@@ -1,0 +1,61 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./storage:/app/storage
+    environment:
+      APP_PORT: 8080
+      APP_ENV: development
+      APP_SECRET: your-super-secret-key
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASS: password
+      DB_NAME: nobarsync
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASS: ""
+      JWT_ACCESS_SECRET: access-secret
+      JWT_REFRESH_SECRET: refresh-secret
+      JWT_ACCESS_EXPIRED: 15m
+      JWT_REFRESH_EXPIRED: 168h
+      STORAGE_TYPE: local
+      STORAGE_PATH: /app/storage
+      STORAGE_BASE_URL: http://localhost:8080/stream
+      MAX_UPLOAD_SIZE_GB: 5
+      MAX_UPLOAD_PER_HOUR: 3
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: nobarsync
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ppassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:

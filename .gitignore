@@ -1,0 +1,28 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+/bin/
+/dist/
+/tmp/
+*.exe
+*.test
+*.out
+coverage.txt
+
+# Go workspace
+vendor/
+
+# Runtime storage
+/storage/originals/*
+/storage/hls/*
+!/storage/originals/.gitkeep
+!/storage/hls/.gitkeep
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

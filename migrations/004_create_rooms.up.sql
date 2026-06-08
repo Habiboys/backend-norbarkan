@@ -1,0 +1,23 @@
+CREATE TABLE rooms (
+    id           CHAR(36)     PRIMARY KEY,
+    name         VARCHAR(100) NOT NULL,
+    code         VARCHAR(10)  NOT NULL UNIQUE,
+    host_id      CHAR(36)     NOT NULL,
+    movie_id     CHAR(36),
+    mode         ENUM('local', 'external') NOT NULL,
+    status       ENUM('waiting','playing','paused','ended') NOT NULL DEFAULT 'waiting',
+    `current_time` FLOAT      NOT NULL DEFAULT 0,
+    is_playing   BOOLEAN      NOT NULL DEFAULT FALSE,
+    is_private   BOOLEAN      NOT NULL DEFAULT FALSE,
+    password     VARCHAR(255),
+    max_members  INT UNSIGNED NOT NULL DEFAULT 10,
+    started_at   DATETIME,
+    ended_at     DATETIME,
+    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_rooms_host FOREIGN KEY (host_id) REFERENCES users(id),
+    CONSTRAINT fk_rooms_movie FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE SET NULL,
+    INDEX idx_rooms_code (code),
+    INDEX idx_rooms_host_id (host_id),
+    INDEX idx_rooms_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

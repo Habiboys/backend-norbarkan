@@ -1,0 +1,22 @@
+CREATE TABLE movies (
+    id               CHAR(36)     PRIMARY KEY,
+    title            VARCHAR(255) NOT NULL,
+    description      TEXT,
+    source_type      ENUM('local', 'external') NOT NULL,
+    provider_name    VARCHAR(100),
+    external_url     VARCHAR(1000),
+    original_path    VARCHAR(500),
+    hls_path         VARCHAR(500),
+    thumbnail_url    VARCHAR(500),
+    duration         INT UNSIGNED,
+    file_size        BIGINT UNSIGNED,
+    transcode_status ENUM('pending','processing','done','failed') DEFAULT 'pending',
+    uploaded_by      CHAR(36)     NOT NULL,
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at       DATETIME,
+    CONSTRAINT fk_movies_uploaded_by FOREIGN KEY (uploaded_by) REFERENCES users(id),
+    INDEX idx_movies_uploaded_by (uploaded_by),
+    INDEX idx_movies_source_type (source_type),
+    INDEX idx_movies_deleted_at (deleted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
