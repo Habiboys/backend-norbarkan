@@ -35,11 +35,14 @@ func main() {
 
 	redisClient, err := database.NewRedis(ctx, cfg.Redis)
 	if err != nil {
-		logger.Fatal("failed to connect redis", zap.Error(err))
+		logger.Warn("redis unavailable, server will start without redis", zap.Error(err))
+		redisClient = nil
 	}
-	defer func() { _ = redisClient.Close() }()
+	if redisClient != nil {
+		defer func() { _ = redisClient.Close() }()
+	}
 
-	app := router.New(db, redisClient)
+	app := router.New(db, redisClient, cfg)
 	addr := fmt.Sprintf(":%s", cfg.App.Port)
 
 	logger.Info("server started", zap.String("addr", addr), zap.String("env", cfg.App.Env))

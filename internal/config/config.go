@@ -15,6 +15,7 @@ type Config struct {
 	JWT     JWTConfig
 	Storage StorageConfig
 	Upload  UploadConfig
+	WebRTC  WebRTCConfig
 }
 
 type AppConfig struct {
@@ -38,9 +39,9 @@ type RedisConfig struct {
 }
 
 type JWTConfig struct {
-	AccessSecret  string
-	RefreshSecret string
-	AccessExpired time.Duration
+	AccessSecret   string
+	RefreshSecret  string
+	AccessExpired  time.Duration
 	RefreshExpired time.Duration
 }
 
@@ -53,6 +54,11 @@ type StorageConfig struct {
 type UploadConfig struct {
 	MaxSizeGB      int
 	MaxUploadPerHr int
+}
+
+type WebRTCConfig struct {
+	STUNURLs            []string
+	MaxCallParticipants int
 }
 
 func Load() (*Config, error) {
@@ -100,9 +106,9 @@ func Load() (*Config, error) {
 			Pass: v.GetString("REDIS_PASS"),
 		},
 		JWT: JWTConfig{
-			AccessSecret:  v.GetString("JWT_ACCESS_SECRET"),
-			RefreshSecret: v.GetString("JWT_REFRESH_SECRET"),
-			AccessExpired: accessExpired,
+			AccessSecret:   v.GetString("JWT_ACCESS_SECRET"),
+			RefreshSecret:  v.GetString("JWT_REFRESH_SECRET"),
+			AccessExpired:  accessExpired,
 			RefreshExpired: refreshExpired,
 		},
 		Storage: StorageConfig{
@@ -113,6 +119,10 @@ func Load() (*Config, error) {
 		Upload: UploadConfig{
 			MaxSizeGB:      v.GetInt("MAX_UPLOAD_SIZE_GB"),
 			MaxUploadPerHr: v.GetInt("MAX_UPLOAD_PER_HOUR"),
+		},
+		WebRTC: WebRTCConfig{
+			STUNURLs:            splitCSV(v.GetString("WEBRTC_STUN_URLS")),
+			MaxCallParticipants: v.GetInt("MAX_CALL_PARTICIPANTS"),
 		},
 	}, nil
 }
@@ -131,11 +141,25 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("REDIS_PASS", "")
 	v.SetDefault("JWT_ACCESS_SECRET", "access-secret")
 	v.SetDefault("JWT_REFRESH_SECRET", "refresh-secret")
-	v.SetDefault("JWT_ACCESS_EXPIRED", "15m")
+	v.SetDefault("JWT_ACCESS_EXPIRED", "24h")
 	v.SetDefault("JWT_REFRESH_EXPIRED", "168h")
 	v.SetDefault("STORAGE_TYPE", "local")
 	v.SetDefault("STORAGE_PATH", "./storage")
 	v.SetDefault("STORAGE_BASE_URL", "http://localhost:8080/stream")
 	v.SetDefault("MAX_UPLOAD_SIZE_GB", 5)
 	v.SetDefault("MAX_UPLOAD_PER_HOUR", 3)
+	v.SetDefault("WEBRTC_STUN_URLS", "stun:stun.l.google.com:19302")
+	v.SetDefault("MAX_CALL_PARTICIPANTS", 8)
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

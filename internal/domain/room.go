@@ -11,8 +11,7 @@ type RoomMemberRole string
 type RoomEventType string
 
 const (
-	RoomModeLocal    RoomMode = "local"
-	RoomModeExternal RoomMode = "external"
+	RoomModeGDrive RoomMode = "gdrive"
 
 	RoomStatusWaiting RoomStatus = "waiting"
 	RoomStatusPlaying RoomStatus = "playing"
@@ -36,7 +35,7 @@ type Room struct {
 	Code        string     `json:"code" gorm:"type:varchar(10);not null;uniqueIndex"`
 	HostID      string     `json:"host_id" gorm:"type:char(36);not null;index"`
 	MovieID     *string    `json:"movie_id" gorm:"type:char(36)"`
-	Mode        RoomMode   `json:"mode" gorm:"type:enum('local','external');not null"`
+	Mode        RoomMode   `json:"mode" gorm:"type:enum('gdrive');not null;default:'gdrive'"`
 	Status      RoomStatus `json:"status" gorm:"type:enum('waiting','playing','paused','ended');not null;default:'waiting';index"`
 	CurrentTime float64    `json:"current_time" gorm:"not null;default:0"`
 	IsPlaying   bool       `json:"is_playing" gorm:"not null;default:false"`

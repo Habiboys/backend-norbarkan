@@ -26,6 +26,8 @@ services:
       STORAGE_BASE_URL: http://localhost:8080/stream
       MAX_UPLOAD_SIZE_GB: 5
       MAX_UPLOAD_PER_HOUR: 3
+      WEBRTC_STUN_URLS: stun:stun.l.google.com:19302
+      MAX_CALL_PARTICIPANTS: 8
     depends_on:
       mysql:
         condition: service_healthy

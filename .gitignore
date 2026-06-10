@@ -18,6 +18,8 @@ vendor/
 # Runtime storage
 /storage/originals/*
 /storage/hls/*
+/storage/cache/*
+/storage/cache/**
 !/storage/originals/.gitkeep
 !/storage/hls/.gitkeep
 

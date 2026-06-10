@@ -20,7 +20,11 @@ func NewHealthHandler(db *gorm.DB, redisClient *redis.Client) *HealthHandler {
 }
 
 func (h *HealthHandler) Check(c *gin.Context) {
-	status := gin.H{"status": "ok"}
+	status := gin.H{
+		"status":   "ok",
+		"database": "connected",
+		"redis":    "disabled",
+	}
 
 	if h.db != nil {
 		sqlDB, err := h.db.DB()
@@ -34,8 +38,9 @@ func (h *HealthHandler) Check(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
 		if err := h.redis.Ping(ctx).Err(); err != nil {
-			response.Error(c, 503, "REDIS_UNAVAILABLE", "Redis tidak tersedia")
-			return
+			status["redis"] = "unavailable"
+		} else {
+			status["redis"] = "connected"
 		}
 	}
 

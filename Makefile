@@ -1,10 +1,13 @@
-.PHONY: tidy run test migrate-up migrate-down seed docker-up docker-down
+.PHONY: tidy run dev test migrate-up migrate-down seed docker-up docker-down
 
 tidy:
 	go mod tidy
 
 run:
 	go run ./cmd/server
+
+dev:
+	air
 
 test:
 	go test ./...

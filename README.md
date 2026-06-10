@@ -21,6 +21,7 @@ Setelah server berjalan, cek API:
 ```powershell
 Invoke-RestMethod http://localhost:8080/health
 Invoke-RestMethod http://localhost:8080/v1/ping
+Invoke-RestMethod http://localhost:8080/v1/webrtc/config
 ```
 
 ## Prasyarat
@@ -100,6 +101,15 @@ Jika menjalankan backend di container Docker Compose, gunakan nilai service Dock
 DB_HOST=mysql
 REDIS_HOST=redis
 ```
+
+Untuk WebRTC/oncam MVP, project ini memakai STUN saja:
+
+```env
+WEBRTC_STUN_URLS=stun:stun.l.google.com:19302
+MAX_CALL_PARTICIPANTS=8
+```
+
+Belum perlu Firebase atau TURN server untuk tahap awal. TURN bisa ditambahkan nanti jika banyak user gagal konek karena NAT/firewall.
 
 ## Menjalankan MySQL dan Redis
 
@@ -208,6 +218,122 @@ Cek endpoint ping API:
 Invoke-RestMethod http://localhost:8080/v1/ping
 ```
 
+### Mode development dengan auto-restart
+
+Project sudah menyediakan konfigurasi Air di `.air.toml`. Gunakan ini saat development supaya backend otomatis rebuild dan restart ketika file `.go` berubah:
+
+```powershell
+air
+```
+
+Atau jika memakai `make`:
+
+```powershell
+make dev
+```
+
+## Endpoint yang Sudah Aktif
+
+### Public
+
+- `GET /health`
+- `GET /v1/ping`
+- `GET /v1/webrtc/config`
+- `GET /stream/:movie_id/master.m3u8` legacy HLS, tidak dipakai di MVP Google Drive
+- `GET /stream/:movie_id/:segment` legacy HLS, tidak dipakai di MVP Google Drive
+
+### Auth
+
+- `POST /v1/auth/register`
+- `POST /v1/auth/login`
+- `POST /v1/auth/refresh`
+- `POST /v1/auth/logout`
+
+### Users
+
+- `GET /v1/users/me`
+- `PUT /v1/users/me`
+- `PUT /v1/users/me/password`
+
+### Movies Google Drive
+
+MVP movie sekarang menggunakan Google Drive only. User menyimpan link Google Drive, bukan upload file ke server.
+
+- `GET /v1/movies`
+- `POST /v1/movies` untuk membuat movie Google Drive
+- `POST /v1/movies/external` alias sementara ke create Google Drive
+- `GET /v1/movies/:id`
+- `DELETE /v1/movies/:id`
+- `GET /v1/movies/:id/transcode-status` legacy, mengembalikan status `not_applicable`
+
+### Rooms
+
+- `POST /v1/rooms`
+- `GET /v1/rooms`
+- `GET /v1/rooms/my`
+- `GET /v1/rooms/:code`
+- `POST /v1/rooms/:code/join`
+- `POST /v1/rooms/:code/leave`
+- `DELETE /v1/rooms/:id`
+- `PUT /v1/rooms/:id`
+- `GET /v1/rooms/:id/chats`
+
+### Contoh Register
+
+```powershell
+$body = @{
+  name = "Nouval"
+  email = "nouvalbaru@example.com"
+  password = "password123"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST `
+  -Uri http://localhost:8080/v1/auth/register `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+### Contoh Login dan Akses Endpoint Protected
+
+```powershell
+$body = @{
+  email = "nouvalbaru@example.com"
+  password = "password123"
+} | ConvertTo-Json
+
+$login = Invoke-RestMethod -Method POST `
+  -Uri http://localhost:8080/v1/auth/login `
+  -ContentType "application/json" `
+  -Body $body
+
+$token = $login.data.access_token
+
+Invoke-RestMethod -Method GET `
+  -Uri http://localhost:8080/v1/users/me `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+### Contoh Tambah Movie Google Drive
+
+Pastikan file Google Drive bisa diakses oleh peserta room. Backend akan mengekstrak `drive_file_id` dan membuat `drive_preview_url` otomatis.
+
+```powershell
+$movieBody = @{
+  title = "Demo Google Drive"
+  description = "Movie dari link Google Drive"
+  drive_url = "https://drive.google.com/file/d/FILE_ID/view?usp=sharing"
+  thumbnail_url = ""
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST `
+  -Uri http://localhost:8080/v1/movies `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType "application/json" `
+  -Body $movieBody
+```
+
+Catatan: Google Drive preview tidak bisa dikontrol penuh untuk sync play/pause/seek seperti player internal. MVP ini fokus ke room, chat, oncam, dan preview/link Google Drive.
+
 ## Shortcut Makefile
 
 Jika `make` tersedia di sistem, bisa pakai command berikut:
@@ -218,6 +344,7 @@ make migrate-up
 make migrate-down
 make seed
 make run
+make dev
 make test
 ```
 
