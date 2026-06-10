@@ -26,11 +26,14 @@ func (h *HealthHandler) Check(c *gin.Context) {
 		"redis":    "disabled",
 	}
 
-	if h.db != nil {
+	if h.db == nil {
+		status["database"] = "unavailable"
+	} else {
 		sqlDB, err := h.db.DB()
 		if err != nil || sqlDB.Ping() != nil {
-			response.Error(c, 503, "DATABASE_UNAVAILABLE", "Database tidak tersedia")
-			return
+			status["database"] = "unavailable"
+		} else {
+			status["database"] = "connected"
 		}
 	}
 

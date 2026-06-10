@@ -30,7 +30,8 @@ func main() {
 
 	db, err := database.NewMySQL(cfg.DB)
 	if err != nil {
-		logger.Fatal("failed to connect database", zap.Error(err))
+		logger.Warn("database unavailable, server will start with limited features", zap.Error(err))
+		db = nil
 	}
 
 	redisClient, err := database.NewRedis(ctx, cfg.Redis)

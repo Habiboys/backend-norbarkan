@@ -21,31 +21,40 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 	r.Use(middleware.CORS())
 
 	healthHandler := handler.NewHealthHandler(db, redisClient)
-	userRepo := repository.NewUserRepository(db)
-	tokenRepo := repository.NewRefreshTokenRepository(db)
-	movieRepo := repository.NewMovieRepository(db)
-	roomRepo := repository.NewRoomRepository(db)
-	memberRepo := repository.NewRoomMemberRepository(db)
-	chatRepo := repository.NewChatRepository(db)
-
-	authService := service.NewAuthService(userRepo, tokenRepo, cfg.JWT)
-	userService := service.NewUserService(userRepo)
-	movieService := service.NewMovieService(movieRepo, cfg.Storage)
-	roomService := service.NewRoomService(roomRepo, memberRepo, chatRepo, cfg.JWT)
-
-	authHandler := handler.NewAuthHandler(authService)
-	userHandler := handler.NewUserHandler(userService)
-	movieHandler := handler.NewMovieHandler(movieService)
-	roomHandler := handler.NewRoomHandler(roomService)
 	streamHandler := handler.NewStreamHandler(cfg.Storage, cfg.JWT)
 	webRTCHandler := handler.NewWebRTCHandler(cfg.WebRTC)
 	cacheDir := filepath.Join(cfg.Storage.Path, "cache", "drive")
 	proxyHandler := handler.NewProxyHandler(cacheDir)
-	roomService.SetCacheCleaner(proxyHandler.ClearDriveCache)
 
-	wsHub := ws.NewHub()
-	go wsHub.Run()
-	wsHandler := handler.NewWSHandler(wsHub, chatRepo, userRepo, roomRepo, memberRepo, cfg.JWT.AccessSecret)
+	var authHandler *handler.AuthHandler
+	var userHandler *handler.UserHandler
+	var movieHandler *handler.MovieHandler
+	var roomHandler *handler.RoomHandler
+	var wsHandler *handler.WSHandler
+
+	if db != nil {
+		userRepo := repository.NewUserRepository(db)
+		tokenRepo := repository.NewRefreshTokenRepository(db)
+		movieRepo := repository.NewMovieRepository(db)
+		roomRepo := repository.NewRoomRepository(db)
+		memberRepo := repository.NewRoomMemberRepository(db)
+		chatRepo := repository.NewChatRepository(db)
+
+		authService := service.NewAuthService(userRepo, tokenRepo, cfg.JWT)
+		userService := service.NewUserService(userRepo)
+		movieService := service.NewMovieService(movieRepo, cfg.Storage)
+		roomService := service.NewRoomService(roomRepo, memberRepo, chatRepo, cfg.JWT)
+		roomService.SetCacheCleaner(proxyHandler.ClearDriveCache)
+
+		authHandler = handler.NewAuthHandler(authService)
+		userHandler = handler.NewUserHandler(userService)
+		movieHandler = handler.NewMovieHandler(movieService)
+		roomHandler = handler.NewRoomHandler(roomService)
+
+		wsHub := ws.NewHub()
+		go wsHub.Run()
+		wsHandler = handler.NewWSHandler(wsHub, chatRepo, userRepo, roomRepo, memberRepo, cfg.JWT.AccessSecret)
+	}
 
 	r.GET("/health", healthHandler.Check)
 	r.GET("/stream/:movie_id/master.m3u8", streamHandler.Master)
@@ -60,6 +69,21 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 			response.OK(c, gin.H{"service": "nobarsync-api"}, "OK")
 		})
 		v1.GET("/webrtc/config", webRTCHandler.Config)
+
+		if db == nil {
+			unavailable := func(c *gin.Context) {
+				response.Error(c, 503, "DATABASE_UNAVAILABLE", "Database belum terhubung. Server tetap hidup, tetapi fitur database belum tersedia.")
+			}
+			v1.Any("/ws", unavailable)
+			v1.Any("/auth/*path", unavailable)
+			v1.Any("/users/*path", unavailable)
+			v1.Any("/movies", unavailable)
+			v1.Any("/movies/*path", unavailable)
+			v1.Any("/rooms", unavailable)
+			v1.Any("/rooms/*path", unavailable)
+			return r
+		}
+
 		v1.GET("/ws", func(c *gin.Context) {
 			wsHandler.Serve(c.Writer, c.Request)
 		})
