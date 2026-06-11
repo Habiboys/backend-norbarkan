@@ -109,7 +109,7 @@ func (h *WSHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		role = "host"
 	}
 
-	if err := h.memberRepo.UpsertActive(&domain.RoomMember{ID: uuid.NewString(), RoomID: room.ID, UserID: userID, Role: domain.RoomRole(role), JoinedAt: time.Now()}); err != nil {
+	if err := h.memberRepo.UpsertActive(&domain.RoomMember{ID: uuid.NewString(), RoomID: room.ID, UserID: userID, Role: domain.RoomMemberRole(role), JoinedAt: time.Now()}); err != nil {
 		log.Printf("ws member upsert error: %v", err)
 		conn.Close()
 		return
