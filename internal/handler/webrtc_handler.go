@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
+	"sync"
 	"time"
 
 	"backend-nobarkan/internal/config"
@@ -22,12 +22,21 @@ func NewWebRTCHandler(cfg config.WebRTCConfig) *WebRTCHandler {
 	return &WebRTCHandler{cfg: cfg}
 }
 
+var cachedICEServers []gin.H
+var cachedICEServersMu sync.RWMutex
+var cachedICEServersAt time.Time
+
 func (h *WebRTCHandler) Config(c *gin.Context) {
 	iceServers := h.staticICEServers()
+
 	if h.cfg.MeteredDomain != "" && h.cfg.MeteredAPIKey != "" {
-		meteredServers, err := h.fetchMeteredICEServers(c.Request.Context())
-		if err == nil && len(meteredServers) > 0 {
-			iceServers = onlyTURNServers(meteredServers)
+		meteredServers := h.getCachedMetered(c.Request.Context())
+		if len(meteredServers) > 0 {
+			// Combine: static (STUN fallback) + TURN from Metered
+			combined := make([]gin.H, 0, len(iceServers)+len(meteredServers))
+			combined = append(combined, iceServers...)
+			combined = append(combined, meteredServers...)
+			iceServers = combined
 		}
 	}
 
@@ -38,51 +47,35 @@ func (h *WebRTCHandler) Config(c *gin.Context) {
 	}, "OK")
 }
 
-func (h *WebRTCHandler) staticICEServers() []gin.H {
-	if len(h.cfg.TURNURLs) > 0 && h.cfg.TURNUsername != "" && h.cfg.TURNCredential != "" {
-		return []gin.H{{
-			"urls":       h.cfg.TURNURLs,
-			"username":   h.cfg.TURNUsername,
-			"credential": h.cfg.TURNCredential,
-		}}
+func (h *WebRTCHandler) getCachedMetered(ctx context.Context) []gin.H {
+	cachedICEServersMu.RLock()
+	if time.Since(cachedICEServersAt) < 5*time.Minute {
+		defer cachedICEServersMu.RUnlock()
+		return cachedICEServers
 	}
+	cachedICEServersMu.RUnlock()
+
+	cachedICEServersMu.Lock()
+	defer cachedICEServersMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if time.Since(cachedICEServersAt) < 5*time.Minute {
+		return cachedICEServers
+	}
+
+	servers, err := h.fetchMeteredICEServers(ctx)
+	if err != nil {
+		return cachedICEServers // keep stale cache on error
+	}
+	cachedICEServers = servers
+	cachedICEServersAt = time.Now()
+	return servers
+}
+func (h *WebRTCHandler) staticICEServers() []gin.H {
 	if len(h.cfg.STUNURLs) > 0 {
 		return []gin.H{{"urls": h.cfg.STUNURLs}}
 	}
 	return []gin.H{}
-}
-
-func onlyTURNServers(servers []gin.H) []gin.H {
-	turnServers := make([]gin.H, 0, len(servers))
-	for _, server := range servers {
-		if hasTURNURL(server["urls"]) {
-			turnServers = append(turnServers, server)
-		}
-	}
-	if len(turnServers) > 0 {
-		return turnServers
-	}
-	return servers
-}
-
-func hasTURNURL(value interface{}) bool {
-	switch urls := value.(type) {
-	case string:
-		return strings.HasPrefix(urls, "turn:") || strings.HasPrefix(urls, "turns:")
-	case []string:
-		for _, item := range urls {
-			if strings.HasPrefix(item, "turn:") || strings.HasPrefix(item, "turns:") {
-				return true
-			}
-		}
-	case []interface{}:
-		for _, item := range urls {
-			if text, ok := item.(string); ok && (strings.HasPrefix(text, "turn:") || strings.HasPrefix(text, "turns:")) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (h *WebRTCHandler) fetchMeteredICEServers(ctx context.Context) ([]gin.H, error) {
