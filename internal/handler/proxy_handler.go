@@ -159,9 +159,30 @@ func (h *ProxyHandler) tryServeFromCache(c *gin.Context, fileID string) bool {
 		return false
 	}
 
-	// http.ServeContent handles Range, If-Modified-Since, Content-Type etc.
 	c.Header("Access-Control-Allow-Origin", "*")
 	c.Header("Access-Control-Expose-Headers", "Accept-Ranges, Content-Range, Content-Length, Content-Type")
+	c.Header("Accept-Ranges", "bytes")
+	c.Header("Content-Type", "video/mp4")
+
+	// Cloud Run cannot return multi-GB responses without Range. Some browsers
+	// first probe video URLs without Range, so force a small 206 chunk instead
+	// of letting http.ServeContent stream the whole file.
+	if c.GetHeader("Range") == "" {
+		chunkSize := int64(1024 * 1024)
+		if stat.Size() < chunkSize {
+			chunkSize = stat.Size()
+		}
+		c.Header("Content-Length", fmt.Sprintf("%d", chunkSize))
+		c.Header("Content-Range", fmt.Sprintf("bytes 0-%d/%d", chunkSize-1, stat.Size()))
+		c.Status(http.StatusPartialContent)
+		if c.Request.Method != http.MethodHead {
+			_, _ = io.CopyN(c.Writer, file, chunkSize)
+		}
+		log.Printf("[cache] served initial chunk file=%s chunk=%d size=%d", fileID, chunkSize, stat.Size())
+		return true
+	}
+
+	// http.ServeContent handles browser Range requests.
 	http.ServeContent(c.Writer, c.Request, fileID+".mp4", stat.ModTime(), file)
 	log.Printf("[cache] served from local file=%s size=%d", fileID, stat.Size())
 	return true
