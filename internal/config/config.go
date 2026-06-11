@@ -58,6 +58,11 @@ type UploadConfig struct {
 
 type WebRTCConfig struct {
 	STUNURLs            []string
+	TURNURLs            []string
+	TURNUsername        string
+	TURNCredential      string
+	MeteredDomain       string
+	MeteredAPIKey       string
 	MaxCallParticipants int
 }
 
@@ -122,6 +127,11 @@ func Load() (*Config, error) {
 		},
 		WebRTC: WebRTCConfig{
 			STUNURLs:            splitCSV(v.GetString("WEBRTC_STUN_URLS")),
+			TURNURLs:            splitCSV(v.GetString("WEBRTC_TURN_URLS")),
+			TURNUsername:        v.GetString("WEBRTC_TURN_USERNAME"),
+			TURNCredential:      v.GetString("WEBRTC_TURN_CREDENTIAL"),
+			MeteredDomain:       v.GetString("WEBRTC_METERED_DOMAIN"),
+			MeteredAPIKey:       v.GetString("WEBRTC_METERED_API_KEY"),
 			MaxCallParticipants: v.GetInt("MAX_CALL_PARTICIPANTS"),
 		},
 	}, nil
@@ -149,6 +159,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("MAX_UPLOAD_SIZE_GB", 5)
 	v.SetDefault("MAX_UPLOAD_PER_HOUR", 3)
 	v.SetDefault("WEBRTC_STUN_URLS", "stun:stun.l.google.com:19302")
+	v.SetDefault("WEBRTC_TURN_URLS", "")
+	v.SetDefault("WEBRTC_TURN_USERNAME", "")
+	v.SetDefault("WEBRTC_TURN_CREDENTIAL", "")
+	v.SetDefault("WEBRTC_METERED_DOMAIN", "")
+	v.SetDefault("WEBRTC_METERED_API_KEY", "")
 	v.SetDefault("MAX_CALL_PARTICIPANTS", 8)
 }
 

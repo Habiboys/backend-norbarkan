@@ -107,6 +107,11 @@ jobs:
             MAX_UPLOAD_SIZE_GB=5
             MAX_UPLOAD_PER_HOUR=3
             WEBRTC_STUN_URLS=${{ secrets.WEBRTC_STUN_URLS }}
+            WEBRTC_TURN_URLS=${{ secrets.WEBRTC_TURN_URLS }}
+            WEBRTC_TURN_USERNAME=${{ secrets.WEBRTC_TURN_USERNAME }}
+            WEBRTC_TURN_CREDENTIAL=${{ secrets.WEBRTC_TURN_CREDENTIAL }}
+            WEBRTC_METERED_DOMAIN=${{ secrets.WEBRTC_METERED_DOMAIN }}
+            WEBRTC_METERED_API_KEY=${{ secrets.WEBRTC_METERED_API_KEY }}
             MAX_CALL_PARTICIPANTS=8
 
       - name: Show service URL
