@@ -109,6 +109,12 @@ func (h *WSHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		role = "host"
 	}
 
+	if err := h.memberRepo.UpsertActive(&domain.RoomMember{ID: uuid.NewString(), RoomID: room.ID, UserID: userID, Role: domain.RoomRole(role), JoinedAt: time.Now()}); err != nil {
+		log.Printf("ws member upsert error: %v", err)
+		conn.Close()
+		return
+	}
+
 	client := &websocket.Client{
 		Hub:      h.hub,
 		Conn:     conn,
@@ -149,20 +155,25 @@ func (h *WSHandler) readPump(client *websocket.Client) {
 	})
 
 	defer func() {
+		isCurrentSocket := h.hub.IsCurrent(client)
 		h.hub.Unregister(client)
-		if err := h.memberRepo.Leave(client.RoomID, client.UserID); err != nil {
-			log.Printf("room member leave error: %v", err)
-		}
 
-		leavePayload, _ := json.Marshal(map[string]interface{}{
-			"type": "member:leave",
-			"payload": map[string]string{
-				"id":   client.UserID,
-				"name": client.UserName,
-				"role": client.Role,
-			},
-		})
-		h.hub.BroadcastToRoom(client.RoomCode, leavePayload, "")
+		// If user already reconnected, don't mark member offline from stale socket.
+		if isCurrentSocket {
+			if err := h.memberRepo.Leave(client.RoomID, client.UserID); err != nil {
+				log.Printf("room member leave error: %v", err)
+			}
+
+			leavePayload, _ := json.Marshal(map[string]interface{}{
+				"type": "member:leave",
+				"payload": map[string]string{
+					"id":   client.UserID,
+					"name": client.UserName,
+					"role": client.Role,
+				},
+			})
+			h.hub.BroadcastToRoom(client.RoomCode, leavePayload, "")
+		}
 
 		client.Conn.Close()
 	}()

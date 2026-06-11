@@ -125,6 +125,13 @@ func (h *Hub) Unregister(client *Client) {
 	h.unregister <- client
 }
 
+func (h *Hub) IsCurrent(client *Client) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	clients := h.rooms[client.RoomCode]
+	return clients != nil && clients[client.UserID] == client
+}
+
 func (h *Hub) BroadcastToRoom(roomCode string, data []byte, excludeUserID string) {
 	h.broadcast <- BroadcastMessage{
 		RoomCode:      roomCode,

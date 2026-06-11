@@ -238,7 +238,7 @@ func (s *RoomService) Join(code string, userID string, password *string) (*JoinR
 	if err := s.members.UpsertActive(&domain.RoomMember{ID: uuid.NewString(), RoomID: room.ID, UserID: userID, Role: role, JoinedAt: time.Now()}); err != nil {
 		return nil, err
 	}
-	wsToken, err := jwtutil.Generate(userID, room.Code, s.jwtCfg.AccessSecret, time.Hour)
+	wsToken, err := jwtutil.Generate(userID, room.Code, s.jwtCfg.AccessSecret, s.jwtCfg.AccessExpired)
 	if err != nil {
 		return nil, err
 	}
