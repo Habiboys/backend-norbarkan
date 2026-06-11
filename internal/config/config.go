@@ -61,8 +61,6 @@ type WebRTCConfig struct {
 	TURNURLs            []string
 	TURNUsername        string
 	TURNCredential      string
-	MeteredDomain       string
-	MeteredAPIKey       string
 	MaxCallParticipants int
 }
 
@@ -130,8 +128,6 @@ func Load() (*Config, error) {
 			TURNURLs:            splitCSV(v.GetString("WEBRTC_TURN_URLS")),
 			TURNUsername:        v.GetString("WEBRTC_TURN_USERNAME"),
 			TURNCredential:      v.GetString("WEBRTC_TURN_CREDENTIAL"),
-			MeteredDomain:       v.GetString("WEBRTC_METERED_DOMAIN"),
-			MeteredAPIKey:       v.GetString("WEBRTC_METERED_API_KEY"),
 			MaxCallParticipants: v.GetInt("MAX_CALL_PARTICIPANTS"),
 		},
 	}, nil
@@ -162,8 +158,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("WEBRTC_TURN_URLS", "")
 	v.SetDefault("WEBRTC_TURN_USERNAME", "")
 	v.SetDefault("WEBRTC_TURN_CREDENTIAL", "")
-	v.SetDefault("WEBRTC_METERED_DOMAIN", "")
-	v.SetDefault("WEBRTC_METERED_API_KEY", "")
 	v.SetDefault("MAX_CALL_PARTICIPANTS", 8)
 }
 
