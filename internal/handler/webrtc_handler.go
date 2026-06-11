@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"backend-nobarkan/internal/config"
@@ -26,7 +27,7 @@ func (h *WebRTCHandler) Config(c *gin.Context) {
 	if h.cfg.MeteredDomain != "" && h.cfg.MeteredAPIKey != "" {
 		meteredServers, err := h.fetchMeteredICEServers(c.Request.Context())
 		if err == nil && len(meteredServers) > 0 {
-			iceServers = meteredServers
+			iceServers = onlyTURNServers(meteredServers)
 		}
 	}
 
@@ -38,18 +39,50 @@ func (h *WebRTCHandler) Config(c *gin.Context) {
 }
 
 func (h *WebRTCHandler) staticICEServers() []gin.H {
-	iceServers := make([]gin.H, 0, 2)
-	if len(h.cfg.STUNURLs) > 0 {
-		iceServers = append(iceServers, gin.H{"urls": h.cfg.STUNURLs})
-	}
 	if len(h.cfg.TURNURLs) > 0 && h.cfg.TURNUsername != "" && h.cfg.TURNCredential != "" {
-		iceServers = append(iceServers, gin.H{
+		return []gin.H{{
 			"urls":       h.cfg.TURNURLs,
 			"username":   h.cfg.TURNUsername,
 			"credential": h.cfg.TURNCredential,
-		})
+		}}
 	}
-	return iceServers
+	if len(h.cfg.STUNURLs) > 0 {
+		return []gin.H{{"urls": h.cfg.STUNURLs}}
+	}
+	return []gin.H{}
+}
+
+func onlyTURNServers(servers []gin.H) []gin.H {
+	turnServers := make([]gin.H, 0, len(servers))
+	for _, server := range servers {
+		if hasTURNURL(server["urls"]) {
+			turnServers = append(turnServers, server)
+		}
+	}
+	if len(turnServers) > 0 {
+		return turnServers
+	}
+	return servers
+}
+
+func hasTURNURL(value interface{}) bool {
+	switch urls := value.(type) {
+	case string:
+		return strings.HasPrefix(urls, "turn:") || strings.HasPrefix(urls, "turns:")
+	case []string:
+		for _, item := range urls {
+			if strings.HasPrefix(item, "turn:") || strings.HasPrefix(item, "turns:") {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, item := range urls {
+			if text, ok := item.(string); ok && (strings.HasPrefix(text, "turn:") || strings.HasPrefix(text, "turns:")) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *WebRTCHandler) fetchMeteredICEServers(ctx context.Context) ([]gin.H, error) {
