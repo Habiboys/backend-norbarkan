@@ -41,6 +41,12 @@ type driveProxyError struct {
 	Suggestion string `json:"suggestion"`
 }
 
+type driveCacheProgress struct {
+	Downloaded int64 `json:"downloaded"`
+	Total      int64 `json:"total"`
+	UpdatedAt  int64 `json:"updated_at"`
+}
+
 type driveServeResult int
 
 const (
@@ -57,8 +63,9 @@ var driveSessions = struct {
 }{items: make(map[string]*driveSession)}
 
 // driveCacheLockers prevents concurrent full-file downloads per fileID.
-var driveCacheLockers sync.Map  // map[fileID]*sync.Mutex
-var driveCacheFailures sync.Map // map[fileID]string
+var driveCacheLockers sync.Map    // map[fileID]*sync.Mutex
+var driveCacheFailures sync.Map   // map[fileID]string
+var driveCacheProgresses sync.Map // map[fileID]driveCacheProgress
 
 func NewProxyHandler(cacheDir string) *ProxyHandler {
 	return &ProxyHandler{CacheDir: cacheDir}
@@ -81,6 +88,35 @@ func cacheFileExists(path string) bool {
 	}
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func updateDriveCacheProgress(fileID string, downloaded int64, total int64) {
+	driveCacheProgresses.Store(fileID, driveCacheProgress{Downloaded: downloaded, Total: total, UpdatedAt: time.Now().Unix()})
+}
+
+type progressWriter struct {
+	fileID     string
+	total      int64
+	downloaded int64
+	lastUpdate time.Time
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	w.downloaded += int64(n)
+	if time.Since(w.lastUpdate) > time.Second || (w.total > 0 && w.downloaded >= w.total) {
+		updateDriveCacheProgress(w.fileID, w.downloaded, w.total)
+		w.lastUpdate = time.Now()
+	}
+	return n, nil
+}
+
+func copyWithDriveProgress(fileID string, dest io.Writer, src io.Reader, total int64) error {
+	updateDriveCacheProgress(fileID, 0, total)
+	writer := &progressWriter{fileID: fileID, total: total, lastUpdate: time.Now()}
+	_, err := io.Copy(dest, io.TeeReader(src, writer))
+	updateDriveCacheProgress(fileID, writer.downloaded, total)
+	return err
 }
 
 func getOrCreateDriveCacheLocker(fileID string) *sync.Mutex {
@@ -157,6 +193,7 @@ func (h *ProxyHandler) triggerCacheDownload(fileID string) {
 		if err := h.downloadDriveFile(fileID, tmpPath); err != nil {
 			log.Printf("[cache] background cache download failed file=%s err=%v", fileID, err)
 			driveCacheFailures.Store(fileID, driveDownloadErrorCode(err))
+			driveCacheProgresses.Delete(fileID)
 			os.Remove(tmpPath) // remove partial file
 			return
 		}
@@ -167,6 +204,7 @@ func (h *ProxyHandler) triggerCacheDownload(fileID string) {
 			return
 		}
 		driveCacheFailures.Delete(fileID)
+		driveCacheProgresses.Delete(fileID)
 		log.Printf("[cache] background cache download complete file=%s", fileID)
 
 		// Auto-delete cache 24 hours from download completion
@@ -260,8 +298,7 @@ func tryDownloadURL(client *http.Client, targetURL, rangeHeader, fileID string, 
 	contentType := resp.Header.Get("Content-Type")
 
 	if !isHTML(contentType) {
-		_, err := io.Copy(dest, resp.Body)
-		if err != nil {
+		if err := copyWithDriveProgress(fileID, dest, resp.Body, resp.ContentLength); err != nil {
 			return fmt.Errorf("copy body: %w", err)
 		}
 		saveDriveFinalURL(fileID, targetURL)
@@ -331,16 +368,14 @@ func tryDownloadURL(client *http.Client, targetURL, rangeHeader, fileID string, 
 			return errDownloadConfirmFailed
 		}
 
-		_, err3 = io.Copy(dest, resp3.Body)
-		if err3 != nil {
+		if err3 = copyWithDriveProgress(fileID, dest, resp3.Body, resp3.ContentLength); err3 != nil {
 			return fmt.Errorf("copy final retry body: %w", err3)
 		}
 		saveDriveFinalURL(fileID, retryURL)
 		return nil
 	}
 
-	_, err2 = io.Copy(dest, resp2.Body)
-	if err2 != nil {
+	if err2 = copyWithDriveProgress(fileID, dest, resp2.Body, resp2.ContentLength); err2 != nil {
 		return fmt.Errorf("copy final body: %w", err2)
 	}
 	saveDriveFinalURL(fileID, finalURL)
@@ -387,6 +422,7 @@ func (h *ProxyHandler) ClearDriveCache(fileID string) {
 	}
 	clearDriveSession(fileID)
 	driveCacheFailures.Delete(fileID)
+	driveCacheProgresses.Delete(fileID)
 	driveCacheLockers.Delete(fileID)
 }
 
@@ -422,7 +458,11 @@ func (h *ProxyHandler) PrefetchDrive(c *gin.Context) {
 		return
 	}
 	if status == "downloading" {
-		c.JSON(http.StatusOK, gin.H{"status": "downloading", "cached": false})
+		payload := gin.H{"status": "downloading", "cached": false}
+		if progress, ok := driveCacheProgresses.Load(fileID); ok {
+			payload["progress"] = progress
+		}
+		c.JSON(http.StatusOK, payload)
 		return
 	}
 

@@ -132,7 +132,8 @@ func (s *RoomService) Create(input CreateRoomInput) (*RoomResponse, error) {
 		if input.Password == nil || strings.TrimSpace(*input.Password) == "" {
 			return nil, fmt.Errorf("private room password required")
 		}
-		hashed, err := passwordhash.Hash(*input.Password)
+		password := strings.TrimSpace(*input.Password)
+		hashed, err := passwordhash.Hash(password)
 		if err != nil {
 			return nil, err
 		}

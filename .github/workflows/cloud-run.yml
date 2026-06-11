@@ -76,10 +76,10 @@ jobs:
           flags: |
             --allow-unauthenticated
             --port=8080
-            --memory=1Gi
-            --cpu=1
+            --memory=4Gi
+            --cpu=2
             --timeout=3600
-            --max-instances=5
+            --max-instances=1
           env_vars: |
             APP_PORT=8080
             APP_ENV=production

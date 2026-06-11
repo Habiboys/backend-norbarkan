@@ -57,6 +57,10 @@ func (h *RoomHandler) Create(c *gin.Context) {
 	}
 	room, err := h.rooms.Create(service.CreateRoomInput{Name: req.Name, MovieID: req.MovieID, Mode: req.Mode, IsPrivate: req.IsPrivate, Password: req.Password, MaxMembers: req.MaxMembers, HostID: userID})
 	if err != nil {
+		if err.Error() == "private room password required" {
+			response.Error(c, http.StatusBadRequest, "ROOM_PASSWORD_REQUIRED", "Password wajib diisi untuk private room")
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Gagal membuat room")
 		return
 	}
