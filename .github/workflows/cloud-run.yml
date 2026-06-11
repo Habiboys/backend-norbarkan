@@ -53,6 +53,20 @@ jobs:
       - name: Push Docker image
         run: docker push "${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
 
+      - name: Run database migrations
+        run: |
+          docker run --rm \
+            -e APP_ENV=production \
+            -e DB_HOST='${{ secrets.DB_HOST }}' \
+            -e DB_PORT='${{ secrets.DB_PORT }}' \
+            -e DB_USER='${{ secrets.DB_USER }}' \
+            -e DB_PASS='${{ secrets.DB_PASS }}' \
+            -e DB_NAME='${{ secrets.DB_NAME }}' \
+            -e JWT_ACCESS_EXPIRED=24h \
+            -e JWT_REFRESH_EXPIRED=168h \
+            "${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            nobarsync-migrate
+
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
