@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,8 +21,9 @@ import (
 )
 
 const (
-	driveSessionTTL       = 20 * time.Minute
-	driveProxyMaxAttempts = 4
+	driveSessionTTL         = 20 * time.Minute
+	driveProxyMaxAttempts   = 4
+	driveCacheMaxChunkBytes = int64(4 * 1024 * 1024)
 )
 
 type ProxyHandler struct {
@@ -138,8 +140,9 @@ func driveDownloadErrorCode(err error) string {
 	}
 }
 
-// tryServeFromCache serves the locally cached video file with full Range
-// support via http.ServeContent. Returns true if the file was served.
+// tryServeFromCache serves the locally cached video file with bounded Range
+// responses. Cloud Run rejects very large responses, so even open-ended ranges
+// like bytes=0- are capped to small chunks.
 func (h *ProxyHandler) tryServeFromCache(c *gin.Context, fileID string) bool {
 	cachePath := h.cachePath(fileID)
 	if !cacheFileExists(cachePath) {
@@ -159,33 +162,90 @@ func (h *ProxyHandler) tryServeFromCache(c *gin.Context, fileID string) bool {
 		return false
 	}
 
+	size := stat.Size()
+	start, end, ok := parseBoundedRange(c.GetHeader("Range"), size)
+	if !ok {
+		writeDriveProxyError(c, http.StatusRequestedRangeNotSatisfiable, "drive_serve_failed")
+		return true
+	}
+	if size == 0 {
+		writeDriveProxyError(c, http.StatusInternalServerError, "drive_serve_failed")
+		return true
+	}
+
+	length := end - start + 1
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		log.Printf("[cache] seek error file=%s start=%d err=%v", fileID, start, err)
+		writeDriveProxyError(c, http.StatusInternalServerError, "drive_serve_failed")
+		return true
+	}
+
 	c.Header("Access-Control-Allow-Origin", "*")
 	c.Header("Access-Control-Expose-Headers", "Accept-Ranges, Content-Range, Content-Length, Content-Type")
 	c.Header("Accept-Ranges", "bytes")
 	c.Header("Content-Type", "video/mp4")
+	c.Header("Content-Length", fmt.Sprintf("%d", length))
+	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
+	c.Status(http.StatusPartialContent)
+	if c.Request.Method != http.MethodHead {
+		_, _ = io.CopyN(c.Writer, file, length)
+	}
+	log.Printf("[cache] served bounded chunk file=%s range=%d-%d size=%d", fileID, start, end, size)
+	return true
+}
 
-	// Cloud Run cannot return multi-GB responses without Range. Some browsers
-	// first probe video URLs without Range, so force a small 206 chunk instead
-	// of letting http.ServeContent stream the whole file.
-	if c.GetHeader("Range") == "" {
-		chunkSize := int64(1024 * 1024)
-		if stat.Size() < chunkSize {
-			chunkSize = stat.Size()
-		}
-		c.Header("Content-Length", fmt.Sprintf("%d", chunkSize))
-		c.Header("Content-Range", fmt.Sprintf("bytes 0-%d/%d", chunkSize-1, stat.Size()))
-		c.Status(http.StatusPartialContent)
-		if c.Request.Method != http.MethodHead {
-			_, _ = io.CopyN(c.Writer, file, chunkSize)
-		}
-		log.Printf("[cache] served initial chunk file=%s chunk=%d size=%d", fileID, chunkSize, stat.Size())
-		return true
+func parseBoundedRange(header string, size int64) (int64, int64, bool) {
+	if size <= 0 {
+		return 0, 0, false
 	}
 
-	// http.ServeContent handles browser Range requests.
-	http.ServeContent(c.Writer, c.Request, fileID+".mp4", stat.ModTime(), file)
-	log.Printf("[cache] served from local file=%s size=%d", fileID, stat.Size())
-	return true
+	start := int64(0)
+	end := min(size-1, driveCacheMaxChunkBytes-1)
+	if strings.TrimSpace(header) == "" {
+		return start, end, true
+	}
+
+	if !strings.HasPrefix(header, "bytes=") {
+		return 0, 0, false
+	}
+	value := strings.TrimPrefix(header, "bytes=")
+	parts := strings.SplitN(value, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+
+	if parts[0] == "" {
+		suffix, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || suffix <= 0 {
+			return 0, 0, false
+		}
+		if suffix > size {
+			suffix = size
+		}
+		start = size - suffix
+		end = size - 1
+	} else {
+		parsedStart, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || parsedStart < 0 || parsedStart >= size {
+			return 0, 0, false
+		}
+		start = parsedStart
+		if parts[1] != "" {
+			parsedEnd, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil || parsedEnd < start {
+				return 0, 0, false
+			}
+			end = min(parsedEnd, size-1)
+		} else {
+			end = size - 1
+		}
+	}
+
+	maxEnd := min(size-1, start+driveCacheMaxChunkBytes-1)
+	if end > maxEnd {
+		end = maxEnd
+	}
+	return start, end, true
 }
 
 // ---------------------------------------------------------------------------
