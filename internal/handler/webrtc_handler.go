@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"backend-nobarkan/internal/config"
 	"backend-nobarkan/internal/pkg/response"
 	"github.com/gin-gonic/gin"
@@ -17,10 +19,13 @@ func NewWebRTCHandler(cfg config.WebRTCConfig) *WebRTCHandler {
 func (h *WebRTCHandler) Config(c *gin.Context) {
 	iceServers := make([]gin.H, 0, 2)
 
-	if len(h.cfg.STUNURLs) > 0 {
-		iceServers = append(iceServers, gin.H{"urls": h.cfg.STUNURLs})
+	// STUN entries — no credential needed
+	stunURLs := splitSTUNOnly(h.cfg.STUNURLs)
+	if len(stunURLs) > 0 {
+		iceServers = append(iceServers, gin.H{"urls": stunURLs})
 	}
 
+	// TURN entry — require username + credential
 	if len(h.cfg.TURNURLs) > 0 && h.cfg.TURNUsername != "" && h.cfg.TURNCredential != "" {
 		iceServers = append(iceServers, gin.H{
 			"urls":       h.cfg.TURNURLs,
@@ -38,4 +43,16 @@ func (h *WebRTCHandler) Config(c *gin.Context) {
 		"max_call_participants": h.cfg.MaxCallParticipants,
 		"max_participants":      h.cfg.MaxCallParticipants,
 	}, "OK")
+}
+
+// splitSTUNOnly returns only stun:// or stuns:// URLs and filters out turn/turns
+func splitSTUNOnly(all []string) []string {
+	out := make([]string, 0, len(all))
+	for _, u := range all {
+		u = strings.TrimSpace(u)
+		if strings.HasPrefix(u, "stun:") || strings.HasPrefix(u, "stuns:") {
+			out = append(out, u)
+		}
+	}
+	return out
 }
