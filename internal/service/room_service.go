@@ -212,8 +212,13 @@ func (s *RoomService) Join(code string, userID string, password *string) (*JoinR
 		return nil, ErrRoomEnded
 	}
 	isHost := room.HostID == userID
-	if room.IsPrivate && !isHost {
-		if password == nil || room.Password == nil || !passwordhash.Compare(*room.Password, *password) {
+	existingMember, err := s.members.Find(room.ID, userID)
+	if err != nil {
+		return nil, err
+	}
+	alreadyActive := existingMember != nil && existingMember.LeftAt == nil
+	if room.IsPrivate && !isHost && !alreadyActive {
+		if password == nil || room.Password == nil || !passwordhash.Compare(*room.Password, strings.TrimSpace(*password)) {
 			return nil, ErrRoomWrongPassword
 		}
 	}

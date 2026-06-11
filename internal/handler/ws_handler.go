@@ -128,6 +128,24 @@ func (h *WSHandler) Serve(w http.ResponseWriter, r *http.Request) {
 
 	h.hub.Register(client)
 
+	for _, online := range h.hub.RoomClients(roomCode) {
+		if online.UserID == userID {
+			continue
+		}
+		presencePayload, _ := json.Marshal(map[string]interface{}{
+			"type": "member:join",
+			"payload": map[string]string{
+				"id":   online.UserID,
+				"name": online.UserName,
+				"role": online.Role,
+			},
+		})
+		select {
+		case client.Send <- presencePayload:
+		default:
+		}
+	}
+
 	joinPayload, _ := json.Marshal(map[string]interface{}{
 		"type": "member:join",
 		"payload": map[string]string{
@@ -160,10 +178,6 @@ func (h *WSHandler) readPump(client *websocket.Client) {
 
 		// If user already reconnected, don't mark member offline from stale socket.
 		if isCurrentSocket {
-			if err := h.memberRepo.Leave(client.RoomID, client.UserID); err != nil {
-				log.Printf("room member leave error: %v", err)
-			}
-
 			leavePayload, _ := json.Marshal(map[string]interface{}{
 				"type": "member:leave",
 				"payload": map[string]string{

@@ -38,6 +38,12 @@ type PlayerState struct {
 	UserName    string
 }
 
+type ClientInfo struct {
+	UserID   string
+	UserName string
+	Role     string
+}
+
 type Hub struct {
 	mu           sync.RWMutex
 	rooms        map[string]map[string]*Client
@@ -130,6 +136,17 @@ func (h *Hub) IsCurrent(client *Client) bool {
 	defer h.mu.RUnlock()
 	clients := h.rooms[client.RoomCode]
 	return clients != nil && clients[client.UserID] == client
+}
+
+func (h *Hub) RoomClients(roomCode string) []ClientInfo {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	clients := h.rooms[roomCode]
+	items := make([]ClientInfo, 0, len(clients))
+	for _, client := range clients {
+		items = append(items, ClientInfo{UserID: client.UserID, UserName: client.UserName, Role: client.Role})
+	}
+	return items
 }
 
 func (h *Hub) BroadcastToRoom(roomCode string, data []byte, excludeUserID string) {
