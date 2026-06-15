@@ -130,6 +130,9 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 				rooms.PUT("/:room", roomHandler.Update)
 				rooms.POST("/:room/chats", roomHandler.SendChat)
 				rooms.GET("/:room/chats", roomHandler.Chats)
+				rooms.POST("/:room/members/:user_id/kick", roomHandler.KickMember)
+				rooms.POST("/:room/members/:user_id/mute", roomHandler.MuteMember)
+				rooms.POST("/:room/members/:user_id/unmute", roomHandler.UnmuteMember)
 			}
 		}
 	}

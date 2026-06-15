@@ -170,6 +170,30 @@ func (h *RoomHandler) Update(c *gin.Context) {
 	response.OK(c, room, "Room berhasil diupdate")
 }
 
+func (h *RoomHandler) KickMember(c *gin.Context) {
+	if err := h.rooms.KickMember(c.Param("room"), currentUserID(c), c.Param("user_id")); err != nil {
+		h.handleRoomError(c, err, "Gagal kick member")
+		return
+	}
+	response.OK(c, nil, "Member berhasil dikeluarkan")
+}
+
+func (h *RoomHandler) MuteMember(c *gin.Context) {
+	if err := h.rooms.SetMemberMuted(c.Param("room"), currentUserID(c), c.Param("user_id"), true); err != nil {
+		h.handleRoomError(c, err, "Gagal mute member")
+		return
+	}
+	response.OK(c, nil, "Member berhasil dimute")
+}
+
+func (h *RoomHandler) UnmuteMember(c *gin.Context) {
+	if err := h.rooms.SetMemberMuted(c.Param("room"), currentUserID(c), c.Param("user_id"), false); err != nil {
+		h.handleRoomError(c, err, "Gagal unmute member")
+		return
+	}
+	response.OK(c, nil, "Member berhasil diunmute")
+}
+
 func (h *RoomHandler) MyRooms(c *gin.Context) {
 	rooms, err := h.rooms.MyRooms(currentUserID(c))
 	if err != nil {

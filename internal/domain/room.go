@@ -56,6 +56,7 @@ type RoomMember struct {
 	UserID   string         `json:"user_id" gorm:"type:char(36);not null;uniqueIndex:uq_room_user;index"`
 	Role     RoomMemberRole `json:"role" gorm:"type:enum('host','member');not null;default:'member'"`
 	IsReady  bool           `json:"is_ready" gorm:"not null;default:false"`
+	IsMuted  bool           `json:"is_muted" gorm:"not null;default:false"`
 	JoinedAt time.Time      `json:"joined_at"`
 	LeftAt   *time.Time     `json:"left_at"`
 	Room     *Room          `json:"room,omitempty" gorm:"foreignKey:RoomID"`

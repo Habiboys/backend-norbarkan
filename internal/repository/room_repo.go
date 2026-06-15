@@ -128,6 +128,10 @@ func (r *RoomMemberRepository) Leave(roomID string, userID string) error {
 	return r.db.Model(&domain.RoomMember{}).Where("room_id = ? AND user_id = ?", roomID, userID).Update("left_at", now).Error
 }
 
+func (r *RoomMemberRepository) SetMuted(roomID string, userID string, muted bool) error {
+	return r.db.Model(&domain.RoomMember{}).Where("room_id = ? AND user_id = ?", roomID, userID).Update("is_muted", muted).Error
+}
+
 func (r *RoomMemberRepository) ListActive(roomID string) ([]domain.RoomMember, error) {
 	var members []domain.RoomMember
 	err := r.db.Preload("User").Where("room_id = ? AND left_at IS NULL", roomID).Find(&members).Error

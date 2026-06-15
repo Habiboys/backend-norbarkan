@@ -1,0 +1,2 @@
+ALTER TABLE room_members
+    ADD COLUMN is_muted BOOLEAN NOT NULL DEFAULT FALSE AFTER is_ready;

@@ -74,6 +74,7 @@ type RoomMemberResponse struct {
 	AvatarURL *string `json:"avatar_url,omitempty"`
 	Role      string  `json:"role"`
 	IsReady   bool    `json:"is_ready"`
+	IsMuted   bool    `json:"is_muted"`
 }
 
 type JoinRoomResult struct {
@@ -338,6 +339,34 @@ func (s *RoomService) Update(code string, userID string, input UpdateRoomInput) 
 	return &response, err
 }
 
+func (s *RoomService) KickMember(code string, actorID string, targetUserID string) error {
+	room, err := s.rooms.FindByCode(strings.ToUpper(strings.TrimSpace(code)))
+	if err != nil {
+		return err
+	}
+	if room == nil {
+		return ErrRoomNotFound
+	}
+	if room.HostID != actorID || targetUserID == "" || targetUserID == actorID || targetUserID == room.HostID {
+		return ErrRoomForbidden
+	}
+	return s.members.Leave(room.ID, targetUserID)
+}
+
+func (s *RoomService) SetMemberMuted(code string, actorID string, targetUserID string, muted bool) error {
+	room, err := s.rooms.FindByCode(strings.ToUpper(strings.TrimSpace(code)))
+	if err != nil {
+		return err
+	}
+	if room == nil {
+		return ErrRoomNotFound
+	}
+	if room.HostID != actorID || targetUserID == "" || targetUserID == actorID || targetUserID == room.HostID {
+		return ErrRoomForbidden
+	}
+	return s.members.SetMuted(room.ID, targetUserID, muted)
+}
+
 func (s *RoomService) MyRooms(userID string) ([]RoomResponse, error) {
 	rooms, err := s.rooms.FindByHostID(userID)
 	if err != nil {
@@ -485,7 +514,7 @@ func (s *RoomService) toResponse(room *domain.Room, includeMembers bool) (RoomRe
 			if members[i].User == nil {
 				continue
 			}
-			response.Members = append(response.Members, RoomMemberResponse{ID: members[i].User.ID, Name: members[i].User.Name, AvatarURL: members[i].User.AvatarURL, Role: string(members[i].Role), IsReady: members[i].IsReady})
+			response.Members = append(response.Members, RoomMemberResponse{ID: members[i].User.ID, Name: members[i].User.Name, AvatarURL: members[i].User.AvatarURL, Role: string(members[i].Role), IsReady: members[i].IsReady, IsMuted: members[i].IsMuted})
 		}
 	}
 	return response, nil

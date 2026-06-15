@@ -45,6 +45,10 @@ type WebRTCPayload struct {
 	Candidate    string `json:"candidate,omitempty"`
 }
 
+type MemberModerationPayload struct {
+	TargetUserID string `json:"target_user_id"`
+}
+
 type WSHandler struct {
 	hub           *websocket.Hub
 	chatRepo      *repository.ChatRepository
@@ -245,8 +249,10 @@ func (h *WSHandler) dispatchMessage(client *websocket.Client, msg *WSMessage) {
 		h.handlePlayerSyncRequest(client)
 	case "webrtc:offer", "webrtc:answer", "webrtc:ice":
 		h.handleWebRTC(client, msg.Type, msg.Payload)
-	case "webrtc:start", "webrtc:stop":
+	case "webrtc:start", "webrtc:stop", "webrtc:mic:start", "webrtc:mic:stop":
 		h.handleWebRTCStartStop(client, msg.Type)
+	case "member:kick", "member:mute", "member:unmute":
+		h.handleMemberModeration(client, msg.Type, msg.Payload)
 	}
 }
 
@@ -437,4 +443,47 @@ func (h *WSHandler) handleWebRTCStartStop(client *websocket.Client, eventType st
 		},
 	})
 	h.hub.BroadcastToRoom(client.RoomCode, payload, client.UserID)
+}
+
+func (h *WSHandler) handleMemberModeration(client *websocket.Client, eventType string, raw json.RawMessage) {
+	room, err := h.roomRepo.FindByCode(client.RoomCode)
+	if err != nil || room == nil || room.HostID != client.UserID {
+		return
+	}
+	var payload MemberModerationPayload
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.TargetUserID == "" || payload.TargetUserID == client.UserID || payload.TargetUserID == room.HostID {
+		return
+	}
+	switch eventType {
+	case "member:kick":
+		if err := h.memberRepo.Leave(room.ID, payload.TargetUserID); err != nil {
+			log.Printf("member kick error: %v", err)
+			return
+		}
+	case "member:mute":
+		if err := h.memberRepo.SetMuted(room.ID, payload.TargetUserID, true); err != nil {
+			log.Printf("member mute error: %v", err)
+			return
+		}
+	case "member:unmute":
+		if err := h.memberRepo.SetMuted(room.ID, payload.TargetUserID, false); err != nil {
+			log.Printf("member unmute error: %v", err)
+			return
+		}
+	}
+
+	outType := map[string]string{
+		"member:kick":   "member:kicked",
+		"member:mute":   "member:muted",
+		"member:unmute": "member:unmuted",
+	}[eventType]
+	out, _ := json.Marshal(map[string]interface{}{
+		"type": outType,
+		"payload": map[string]string{
+			"target_user_id": payload.TargetUserID,
+			"user_id":        payload.TargetUserID,
+			"actor_user_id":  client.UserID,
+		},
+	})
+	h.hub.BroadcastToRoom(client.RoomCode, out, "")
 }
