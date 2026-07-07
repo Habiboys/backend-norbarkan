@@ -187,19 +187,55 @@ def stream_url(req: ExtractRequest):
     """Get direct video URL for streaming. No download."""
     try:
         # yt-dlp -g gives direct media URL
-        cmd = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best", "--no-warnings"]
+        # Try with format selector first, then fall back
+        direct_url = None
+
+        # Attempt 1: with format
+        cmd1 = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best", "--no-warnings"]
         if COOKIES_FILE:
-            cmd += ["--cookies", COOKIES_FILE]
-        cmd += [req.url]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            raise RuntimeError(f"yt-dlp stream failed: {result.stderr.strip()}")
-        urls = result.stdout.strip().splitlines()
-        if not urls:
-            raise RuntimeError("yt-dlp returned no stream URL")
-        direct_url = urls[-1]  # last line = video URL
-        # Also get metadata for response
-        meta = run_ytdlp_json([req.url])
+            cmd1 += ["--cookies", COOKIES_FILE]
+        cmd1 += [req.url]
+        result1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=30)
+        if result1.returncode == 0:
+            urls = result1.stdout.strip().splitlines()
+            if urls:
+                direct_url = urls[-1]
+
+        # Attempt 2: no format restriction (yt-dlp picks best)
+        if not direct_url:
+            cmd2 = [sys.executable, "-m", "yt_dlp", "-g", "--no-warnings"]
+            if COOKIES_FILE:
+                cmd2 += ["--cookies", COOKIES_FILE]
+            cmd2 += [req.url]
+            result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=30)
+            if result2.returncode == 0:
+                urls = result2.stdout.strip().splitlines()
+                if urls:
+                    direct_url = urls[-1]
+
+        # Attempt 3: --ignore-no-formats-error
+        if not direct_url:
+            cmd3 = [sys.executable, "-m", "yt_dlp", "-g", "--ignore-no-formats-error", "--no-warnings"]
+            if COOKIES_FILE:
+                cmd3 += ["--cookies", COOKIES_FILE]
+            cmd3 += [req.url]
+            result3 = subprocess.run(cmd3, capture_output=True, text=True, timeout=30)
+            if result3.returncode == 0:
+                urls = result3.stdout.strip().splitlines()
+                if urls:
+                    direct_url = urls[-1]
+
+        if not direct_url:
+            # Best effort: return last error
+            err = result3.stderr.strip() if 'result3' in dir() else (result2.stderr.strip() if 'result2' in dir() else result1.stderr.strip())
+            raise RuntimeError(f"yt-dlp stream failed: {err}")
+
+        # Get metadata for response
+        try:
+            meta = run_ytdlp_json([req.url])
+        except Exception:
+            meta = {"title": "Unknown", "duration": None, "thumbnail": None, "extractor": None}
+
         return StreamURLResponse(
             url=direct_url,
             title=meta.get("title", "Unknown"),
