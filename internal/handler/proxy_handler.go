@@ -148,12 +148,17 @@ func (h *ProxyHandler) proxyStreamURL(c *gin.Context, targetURL string) {
 		return
 	}
 
-	// Forward Range header
+	// Forward headers
 	if rangeHeader := c.GetHeader("Range"); rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
 	}
-	// Forward User-Agent (some CDNs check it)
-	req.Header.Set("User-Agent", c.GetHeader("User-Agent"))
+	if ua := c.GetHeader("User-Agent"); ua != "" {
+		req.Header.Set("User-Agent", ua)
+	} else {
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	}
+	req.Header.Set("Referer", "https://www.youtube.com/")
+	req.Header.Set("Origin", "https://www.youtube.com")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -163,23 +168,41 @@ func (h *ProxyHandler) proxyStreamURL(c *gin.Context, targetURL string) {
 	}
 	defer resp.Body.Close()
 
-	// Copy response headers
-	c.Header("Content-Type", resp.Header.Get("Content-Type"))
-	c.Header("Content-Length", resp.Header.Get("Content-Length"))
-	c.Header("Content-Range", resp.Header.Get("Content-Range"))
-	c.Header("Accept-Ranges", resp.Header.Get("Accept-Ranges"))
+	// Handle non-success — fail fast
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusNotModified {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[stream] upstream returned %d: %s", resp.StatusCode, string(body[:min(len(body), 500)]))
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": gin.H{
+				"code":    "stream_error",
+				"title":   "Gagal memuat video",
+				"message": fmt.Sprintf("Server video mengembalikan error (HTTP %d)", resp.StatusCode),
+			},
+		})
+		return
+	}
+
+	// Copy response headers — only pass through relevant ones
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "video/mp4"
+	}
+	contentLen := resp.Header.Get("Content-Length")
+	contentRange := resp.Header.Get("Content-Range")
+	acceptRanges := resp.Header.Get("Accept-Ranges")
+
+	c.Header("Content-Type", contentType)
 	c.Header("Access-Control-Allow-Origin", "*")
 	c.Header("Access-Control-Expose-Headers", "Accept-Ranges, Content-Range, Content-Length, Content-Type")
-
-	if resp.StatusCode == http.StatusPartialContent || resp.StatusCode == http.StatusOK {
-		c.Status(resp.StatusCode)
-	} else if resp.StatusCode == http.StatusMovedPermanently || resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusPermanentRedirect {
-		// Follow redirect automatically handled by http.Client, but if still got one, redirect client
-		c.Redirect(resp.StatusCode, resp.Header.Get("Location"))
-		return
-	} else {
-		c.Status(resp.StatusCode)
+	c.Header("Accept-Ranges", acceptRanges)
+	if contentLen != "" {
+		c.Header("Content-Length", contentLen)
 	}
+	if contentRange != "" {
+		c.Header("Content-Range", contentRange)
+	}
+
+	c.Status(resp.StatusCode)
 
 	if c.Request.Method != http.MethodHead {
 		_, _ = io.Copy(c.Writer, resp.Body)

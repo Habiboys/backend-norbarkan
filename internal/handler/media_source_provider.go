@@ -26,26 +26,29 @@ func (p *MovieSourceProvider) GetOriginalPath(movieID string) (string, error) {
 		return "", nil
 	}
 
-	// Already have stream URL
-	if movie.OriginalPath != nil && *movie.OriginalPath != "" {
-		return *movie.OriginalPath, nil
-	}
-
-	// No stream URL yet — fetch from sidecar
+	// Always fetch fresh stream URL — YouTube URLs expire
 	if movie.ExternalURL == nil || *movie.ExternalURL == "" || p.sidecar == nil {
+		// Fallback to cached if sidecar unavailable
+		if movie.OriginalPath != nil && *movie.OriginalPath != "" {
+			return *movie.OriginalPath, nil
+		}
 		return "", nil
 	}
 
 	streamInfo, err := p.sidecar.StreamURL(*movie.ExternalURL)
 	if err != nil {
 		log.Printf("[source] sidecar stream url failed for %s: %v", movieID, err)
+		// Fallback to cached URL
+		if movie.OriginalPath != nil && *movie.OriginalPath != "" {
+			return *movie.OriginalPath, nil
+		}
 		return "", nil
 	}
 
-	// Persist for next time
-	movie.OriginalPath = &streamInfo.URL
-	if err := p.repo.Update(movie); err != nil {
-		log.Printf("[source] failed to update movie %s original_path: %v", movieID, err)
+	// Update cache for next call (in case sidecar temporarily down)
+	if streamInfo.URL != *movie.OriginalPath {
+		movie.OriginalPath = &streamInfo.URL
+		_ = p.repo.Update(movie)
 	}
 	return streamInfo.URL, nil
 }
