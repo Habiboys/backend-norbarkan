@@ -88,7 +88,8 @@ class StreamURLResponse(BaseModel):
 
 def run_ytdlp_json(args: list[str]) -> dict:
     """Run yt-dlp with --dump-json and return parsed dict."""
-    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings", "-f", "bv*+ba/b"]
+    # Try without format selection first — if fails due to format issues, retry with ignore
+    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings"]
     if COOKIES_FILE:
         cmd += ["--cookies", COOKIES_FILE]
     cmd += args
@@ -98,12 +99,53 @@ def run_ytdlp_json(args: list[str]) -> dict:
         text=True,
         timeout=30,
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"yt-dlp extract failed: {result.stderr.strip()}")
-    if not result.stdout.strip():
-        raise RuntimeError("yt-dlp returned empty output")
-    lines = result.stdout.strip().splitlines()
-    return json.loads(lines[-1])
+    if result.returncode == 0 and result.stdout.strip():
+        lines = result.stdout.strip().splitlines()
+        return json.loads(lines[-1])
+
+    # Retry with flat info (no format extraction) for videos with restricted formats
+    cmd2 = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings",
+            "--ignore-no-formats-error", "--flat"]
+    if COOKIES_FILE:
+        cmd2 += ["--cookies", COOKIES_FILE]
+    cmd2 += args
+    result2 = subprocess.run(
+        cmd2,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result2.returncode == 0 and result2.stdout.strip():
+        lines2 = result2.stdout.strip().splitlines()
+        info = json.loads(lines2[-1])
+        # Flat mode may miss some fields — fill defaults
+        if "title" not in info or not info.get("title"):
+            info["title"] = info.get("id", "Unknown")
+        return info
+
+    # Last resort: try --print title (just gets title from webpage, no format extraction)
+    cmd3 = [sys.executable, "-m", "yt_dlp", "--print", "title", "--print", "duration", "--print", "thumbnail"]
+    if COOKIES_FILE:
+        cmd3 += ["--cookies", COOKIES_FILE]
+    cmd3 += args
+    result3 = subprocess.run(
+        cmd3,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result3.returncode == 0 and result3.stdout.strip():
+        lines3 = result3.stdout.strip().splitlines()
+        title = lines3[0] if len(lines3) > 0 else "Unknown"
+        dur_str = lines3[1] if len(lines3) > 1 else "0"
+        thumb = lines3[2] if len(lines3) > 2 else ""
+        try:
+            dur = float(dur_str)
+        except ValueError:
+            dur = 0
+        return {"title": title, "duration": dur, "thumbnail": thumb}
+
+    raise RuntimeError(f"yt-dlp extract failed: {result.stderr.strip()}")
 
 
 def run_ytdlp_download(args: list[str]) -> subprocess.CompletedProcess:

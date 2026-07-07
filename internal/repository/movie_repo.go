@@ -68,6 +68,10 @@ func (r *MovieRepository) Update(movie *domain.Movie) error {
 	return r.db.Save(movie).Error
 }
 
+func (r *MovieRepository) UpdatePartial(id string, values map[string]interface{}) error {
+	return r.db.Model(&domain.Movie{}).Where("id = ?", id).Updates(values).Error
+}
+
 func (r *MovieRepository) SoftDelete(id string) error {
 	now := time.Now()
 	return r.db.Model(&domain.Movie{}).Where("id = ?", id).Update("deleted_at", now).Error

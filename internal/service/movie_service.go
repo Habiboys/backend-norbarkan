@@ -96,37 +96,9 @@ func (s *MovieService) CreateExternal(input CreateExternalMovieInput) (*MovieRes
 		return nil, fmt.Errorf("invalid external movie payload: url required")
 	}
 
-	// Extract metadata from sidecar
-	meta, err := s.sidecar.Extract(url)
-	if err != nil {
-		return nil, fmt.Errorf("sidecar extract: %w", err)
-	}
-
-	title := meta.Title
+	title := "Unknown"
 	if input.Title != nil && strings.TrimSpace(*input.Title) != "" {
 		title = strings.TrimSpace(*input.Title)
-	}
-
-	thumbnail := normalizeStringPtr(input.ThumbnailURL)
-	if thumbnail == nil && meta.Thumbnail != "" {
-		t := meta.Thumbnail
-		thumbnail = &t
-	}
-
-	providerName := meta.Extractor
-	if providerName == "" {
-		providerName = "external"
-	}
-
-	var duration *uint
-	if meta.Duration > 0 {
-		d := uint(meta.Duration)
-		duration = &d
-	}
-
-	externalURL := url
-	if meta.WebpageURL != "" {
-		externalURL = meta.WebpageURL
 	}
 
 	movie := &domain.Movie{
@@ -134,26 +106,53 @@ func (s *MovieService) CreateExternal(input CreateExternalMovieInput) (*MovieRes
 		Title:           title,
 		Description:     normalizeStringPtr(input.Description),
 		SourceType:      domain.MovieSourceExternal,
-		ProviderName:    &providerName,
-		ExternalURL:     &externalURL,
-		ThumbnailURL:    thumbnail,
-		Duration:        duration,
+		ThumbnailURL:    normalizeStringPtr(input.ThumbnailURL),
+		ExternalURL:     &url,
 		TranscodeStatus: domain.TranscodeDone,
 		UploadedBy:      input.UploadedBy,
-	}
-
-	// Get direct stream URL via sidecar
-	streamInfo, err := s.sidecar.StreamURL(url)
-	if err == nil {
-		movie.OriginalPath = &streamInfo.URL
 	}
 
 	if err := s.movies.Create(movie); err != nil {
 		return nil, err
 	}
 
+	// Background: extract metadata + stream URL
+	go s.enrichMovie(movie.ID, url)
+
 	response := s.toResponse(movie)
 	return &response, nil
+}
+
+func (s *MovieService) enrichMovie(movieID, url string) {
+	// Try extract metadata
+	meta, err := s.sidecar.Extract(url)
+	if err == nil {
+		update := map[string]interface{}{}
+		if meta.Title != "" {
+			update["title"] = meta.Title
+		}
+		if meta.Thumbnail != "" {
+			update["thumbnail_url"] = meta.Thumbnail
+		}
+		if meta.Duration > 0 {
+			d := uint(meta.Duration)
+			update["duration"] = d
+		}
+		if meta.Extractor != "" {
+			update["provider_name"] = meta.Extractor
+		}
+		if len(update) > 0 {
+			_ = s.movies.UpdatePartial(movieID, update)
+		}
+	}
+
+	// Get stream URL
+	streamInfo, err := s.sidecar.StreamURL(url)
+	if err == nil && streamInfo.URL != "" {
+		_ = s.movies.UpdatePartial(movieID, map[string]interface{}{
+			"original_path": streamInfo.URL,
+		})
+	}
 }
 
 func (s *MovieService) Get(id string) (*MovieResponse, error) {
