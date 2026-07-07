@@ -145,7 +145,7 @@ def stream_url(req: ExtractRequest):
     """Get direct video URL for streaming. No download."""
     try:
         # yt-dlp -g gives direct media URL
-        cmd = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best", "--no-warnings"]
+        cmd = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best", "--no-warnings"]
         if COOKIES_FILE:
             cmd += ["--cookies", COOKIES_FILE]
         cmd += [req.url]
