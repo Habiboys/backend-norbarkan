@@ -88,7 +88,7 @@ class StreamURLResponse(BaseModel):
 
 def run_ytdlp_json(args: list[str]) -> dict:
     """Run yt-dlp with --dump-json and return parsed dict."""
-    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings"]
+    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings", "-f", "bv*+ba/b"]
     if COOKIES_FILE:
         cmd += ["--cookies", COOKIES_FILE]
     cmd += args
