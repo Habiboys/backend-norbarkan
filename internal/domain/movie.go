@@ -7,7 +7,7 @@ type MovieSourceType string
 type TranscodeStatus string
 
 const (
-	MovieSourceGDrive MovieSourceType = "gdrive"
+	MovieSourceExternal MovieSourceType = "external"
 
 	TranscodePending    TranscodeStatus = "pending"
 	TranscodeProcessing TranscodeStatus = "processing"
@@ -19,11 +19,9 @@ type Movie struct {
 	ID              string          `json:"id" gorm:"type:char(36);primaryKey"`
 	Title           string          `json:"title" gorm:"type:varchar(255);not null"`
 	Description     *string         `json:"description" gorm:"type:text"`
-	SourceType      MovieSourceType `json:"source_type" gorm:"type:enum('gdrive');not null;default:'gdrive';index"`
+	SourceType      MovieSourceType `json:"source_type" gorm:"type:enum('external');not null;default:'external';index"`
 	ProviderName    *string         `json:"provider_name" gorm:"type:varchar(100)"`
 	ExternalURL     *string         `json:"external_url" gorm:"type:varchar(1000)"`
-	DriveFileID     *string         `json:"drive_file_id" gorm:"type:varchar(255);index"`
-	DriveURL        *string         `json:"drive_url" gorm:"type:varchar(1000)"`
 	OriginalPath    *string         `json:"original_path" gorm:"type:varchar(500)"`
 	HLSPath         *string         `json:"hls_path" gorm:"type:varchar(500)"`
 	ThumbnailURL    *string         `json:"thumbnail_url" gorm:"type:varchar(500)"`

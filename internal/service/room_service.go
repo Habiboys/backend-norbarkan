@@ -23,15 +23,11 @@ var (
 	ErrRoomEnded         = errors.New("room ended")
 )
 
-// DriveCacheCleaner is a function type that deletes the local cache for a Drive fileID.
-type DriveCacheCleaner func(fileID string)
-
 type RoomService struct {
-	rooms           *repository.RoomRepository
-	members         *repository.RoomMemberRepository
-	chats           *repository.ChatRepository
-	jwtCfg          config.JWTConfig
-	clearDriveCache DriveCacheCleaner
+	rooms   *repository.RoomRepository
+	members *repository.RoomMemberRepository
+	chats   *repository.ChatRepository
+	jwtCfg  config.JWTConfig
 }
 
 type CreateRoomInput struct {
@@ -99,18 +95,6 @@ func NewRoomService(rooms *repository.RoomRepository, members *repository.RoomMe
 	return &RoomService{rooms: rooms, members: members, chats: chats, jwtCfg: jwtCfg}
 }
 
-// SetCacheCleaner sets the function used to clear Drive cache for a fileID.
-func (s *RoomService) SetCacheCleaner(cleaner DriveCacheCleaner) {
-	s.clearDriveCache = cleaner
-}
-
-func (s *RoomService) clearMovieDriveCache(room *domain.Room) {
-	if s.clearDriveCache == nil || room == nil || room.Movie == nil || room.Movie.DriveFileID == nil || *room.Movie.DriveFileID == "" {
-		return
-	}
-	s.clearDriveCache(*room.Movie.DriveFileID)
-}
-
 func (s *RoomService) Create(input CreateRoomInput) (*RoomResponse, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -118,9 +102,9 @@ func (s *RoomService) Create(input CreateRoomInput) (*RoomResponse, error) {
 	}
 	mode := domain.RoomMode(strings.TrimSpace(input.Mode))
 	if mode == "" {
-		mode = domain.RoomModeGDrive
+		mode = domain.RoomModeExternal
 	}
-	if mode != domain.RoomModeGDrive {
+	if mode != domain.RoomModeExternal {
 		return nil, fmt.Errorf("invalid room mode")
 	}
 	maxMembers := input.MaxMembers
@@ -277,11 +261,7 @@ func (s *RoomService) Close(code string, userID string) error {
 	if room.HostID != userID {
 		return ErrRoomForbidden
 	}
-	if err := s.rooms.Close(room.ID); err != nil {
-		return err
-	}
-	s.clearMovieDriveCache(room)
-	return nil
+	return s.rooms.Close(room.ID)
 }
 
 func (s *RoomService) Delete(code string, userID string) error {
@@ -295,11 +275,7 @@ func (s *RoomService) Delete(code string, userID string) error {
 	if room.HostID != userID {
 		return ErrRoomForbidden
 	}
-	if err := s.rooms.Delete(room.ID); err != nil {
-		return err
-	}
-	s.clearMovieDriveCache(room)
-	return nil
+	return s.rooms.Delete(room.ID)
 }
 
 func (s *RoomService) Update(code string, userID string, input UpdateRoomInput) (*RoomResponse, error) {
@@ -458,26 +434,10 @@ func (s *RoomService) toResponse(room *domain.Room, includeMembers bool) (RoomRe
 	if room.Movie != nil {
 		m := room.Movie
 
-		var drivePreviewURL *string
-		if m.DriveFileID != nil && *m.DriveFileID != "" {
-			value := "https://drive.google.com/file/d/" + *m.DriveFileID + "/preview"
-			drivePreviewURL = &value
-		}
-		driveURL := m.DriveURL
-		if driveURL == nil {
-			driveURL = m.ExternalURL
-		}
-
 		var uploader *UserResponse
 		if m.Uploader != nil {
 			value := toUserResponse(m.Uploader)
 			uploader = &value
-		}
-
-		var driveDirectURL *string
-		if m.DriveFileID != nil && *m.DriveFileID != "" {
-			value := "/proxy/drive/" + *m.DriveFileID
-			driveDirectURL = &value
 		}
 
 		movie = &MovieResponse{
@@ -487,10 +447,6 @@ func (s *RoomService) toResponse(room *domain.Room, includeMembers bool) (RoomRe
 			SourceType:      m.SourceType,
 			ProviderName:    m.ProviderName,
 			ExternalURL:     m.ExternalURL,
-			DriveFileID:     m.DriveFileID,
-			DriveURL:        driveURL,
-			DrivePreviewURL: drivePreviewURL,
-			DriveDirectURL:  driveDirectURL,
 			ThumbnailURL:    m.ThumbnailURL,
 			Duration:        m.Duration,
 			FileSize:        m.FileSize,

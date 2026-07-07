@@ -1,6 +1,7 @@
 package router
 
 import (
+	"net/http"
 	"path/filepath"
 
 	"backend-nobarkan/internal/config"
@@ -23,7 +24,7 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 	healthHandler := handler.NewHealthHandler(db, redisClient)
 	streamHandler := handler.NewStreamHandler(cfg.Storage, cfg.JWT)
 	webRTCHandler := handler.NewWebRTCHandler(cfg.WebRTC)
-	cacheDir := filepath.Join(cfg.Storage.Path, "cache", "drive")
+	cacheDir := filepath.Join(cfg.Storage.Path, "cache")
 	proxyHandler := handler.NewProxyHandler(cacheDir)
 
 	var authHandler *handler.AuthHandler
@@ -42,14 +43,27 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 
 		authService := service.NewAuthService(userRepo, tokenRepo, cfg.JWT)
 		userService := service.NewUserService(userRepo)
-		movieService := service.NewMovieService(movieRepo, cfg.Storage)
+		sidecarClient := service.NewSidecarClient(cfg.Sidecar.URL)
+		movieService := service.NewMovieService(movieRepo, cfg.Storage, sidecarClient)
 		roomService := service.NewRoomService(roomRepo, memberRepo, chatRepo, cfg.JWT)
-		roomService.SetCacheCleaner(proxyHandler.ClearDriveCache)
 
 		authHandler = handler.NewAuthHandler(authService)
 		userHandler = handler.NewUserHandler(userService)
 		movieHandler = handler.NewMovieHandler(movieService)
 		roomHandler = handler.NewRoomHandler(roomService)
+
+		// Media source provider for proxy routes
+		mediaSourceProvider := handler.NewMovieSourceProvider(movieRepo, sidecarClient)
+		proxyRoutes := r.Group("")
+		proxyRoutes.Use(func(c *gin.Context) {
+			c.Set("mediaSourceProvider", mediaSourceProvider)
+			c.Next()
+		})
+		{
+			proxyRoutes.GET("/proxy/external/:movieId", proxyHandler.ExternalProxy)
+			proxyRoutes.GET("/proxy/external/:movieId/status", proxyHandler.ExternalCacheStatus)
+			proxyRoutes.GET("/proxy/external/:movieId/progress", proxyHandler.ExternalProgress)
+		}
 
 		wsHub := ws.NewHub()
 		go wsHub.Run()
@@ -59,9 +73,18 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 	r.GET("/health", healthHandler.Check)
 	r.GET("/stream/:movie_id/master.m3u8", streamHandler.Master)
 	r.GET("/stream/:movie_id/:segment", streamHandler.Segment)
-	r.GET("/proxy/drive/:fileId", proxyHandler.DriveProxy)
-	r.POST("/proxy/drive/:fileId/prefetch", proxyHandler.PrefetchDrive)
-	r.GET("/proxy/drive/:fileId/prefetch", proxyHandler.PrefetchDrive)
+
+	// Legacy GDrive proxy - keep for backward compat but redirect or serve error
+	r.GET("/proxy/drive/:fileId", func(c *gin.Context) {
+		c.JSON(http.StatusGone, gin.H{
+			"error": gin.H{
+				"code":       "gdrive_deprecated",
+				"title":      "Google Drive sudah tidak didukung",
+				"message":    "Nobarkan sekarang menggunakan yt-dlp untuk semua sumber film. Gunakan menu Movies untuk menambah film via link.",
+				"suggestion": "Buka halaman Movies, tambah film baru via link URL biasa.",
+			},
+		})
+	})
 
 	v1 := r.Group("/v1")
 	{
@@ -79,6 +102,7 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 			v1.Any("/users/*path", unavailable)
 			v1.Any("/movies", unavailable)
 			v1.Any("/movies/*path", unavailable)
+			v1.Any("/extractors", unavailable)
 			v1.Any("/rooms", unavailable)
 			v1.Any("/rooms/*path", unavailable)
 			return r
@@ -109,13 +133,14 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 			movies := protected.Group("/movies")
 			{
 				movies.GET("", movieHandler.List)
-				movies.POST("", movieHandler.CreateGDrive)
-				movies.POST("/external", movieHandler.CreateGDrive)
+				movies.POST("", movieHandler.CreateFromURL)
 				movies.GET("/:id", movieHandler.Get)
 				movies.PUT("/:id", movieHandler.Update)
 				movies.DELETE("/:id", movieHandler.Delete)
 				movies.GET("/:id/transcode-status", movieHandler.TranscodeStatus)
 			}
+
+			protected.GET("/extractors", movieHandler.ListExtractors)
 
 			rooms := protected.Group("/rooms")
 			{

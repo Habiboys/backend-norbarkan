@@ -15,17 +15,16 @@ type MovieHandler struct {
 	movies *service.MovieService
 }
 
-type createGDriveMovieRequest struct {
-	Title        string  `json:"title" binding:"required"`
+type createExternalMovieRequest struct {
+	URL          string  `json:"url" binding:"required"`
+	Title        *string `json:"title"`
 	Description  *string `json:"description"`
-	DriveURL     string  `json:"drive_url" binding:"required"`
 	ThumbnailURL *string `json:"thumbnail_url"`
 }
 
 type updateMovieRequest struct {
 	Title        *string `json:"title"`
 	Description  *string `json:"description"`
-	DriveURL     *string `json:"drive_url"`
 	ThumbnailURL *string `json:"thumbnail_url"`
 }
 
@@ -51,36 +50,40 @@ func (h *MovieHandler) List(c *gin.Context) {
 	response.WithMeta(c, http.StatusOK, result.Data, gin.H{"page": result.Page, "per_page": result.PerPage, "total": result.Total}, "OK")
 }
 
-func (h *MovieHandler) CreateGDrive(c *gin.Context) {
+func (h *MovieHandler) CreateFromURL(c *gin.Context) {
 	userID := currentUserID(c)
 	if userID == "" {
 		response.Error(c, http.StatusUnauthorized, "TOKEN_INVALID", "Token tidak valid")
 		return
 	}
 
-	var req createGDriveMovieRequest
+	var req createExternalMovieRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "Payload movie Google Drive tidak valid")
+		response.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "URL film wajib diisi")
 		return
 	}
 
-	movie, err := h.movies.CreateGDrive(service.CreateGDriveMovieInput{
+	movie, err := h.movies.CreateExternal(service.CreateExternalMovieInput{
+		URL:          req.URL,
 		Title:        req.Title,
 		Description:  req.Description,
-		DriveURL:     req.DriveURL,
 		ThumbnailURL: req.ThumbnailURL,
 		UploadedBy:   userID,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidGoogleDriveURL) {
-			response.Error(c, http.StatusBadRequest, "INVALID_GDRIVE_URL", "Link Google Drive tidak valid")
+		if errors.Is(err, service.ErrInvalidExternalURL) {
+			response.Error(c, http.StatusBadRequest, "INVALID_URL", "Link tidak valid")
 			return
 		}
-		response.Error(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Gagal membuat movie Google Drive")
+		if errors.Is(err, service.ErrSidecarUnavailable) {
+			response.Error(c, http.StatusServiceUnavailable, "SIDECAR_UNAVAILABLE", "Service extractor sedang tidak tersedia. Coba lagi nanti.")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Gagal membuat movie: "+err.Error())
 		return
 	}
 
-	response.Created(c, movie, "Movie Google Drive berhasil dibuat")
+	response.Created(c, movie, "Movie berhasil dibuat")
 }
 
 func (h *MovieHandler) Get(c *gin.Context) {
@@ -135,7 +138,6 @@ func (h *MovieHandler) Update(c *gin.Context) {
 	movie, err := h.movies.Update(c.Param("id"), userID, service.UpdateMovieInput{
 		Title:        req.Title,
 		Description:  req.Description,
-		DriveURL:     req.DriveURL,
 		ThumbnailURL: req.ThumbnailURL,
 	})
 	if err != nil {
@@ -145,10 +147,6 @@ func (h *MovieHandler) Update(c *gin.Context) {
 		}
 		if errors.Is(err, service.ErrMovieForbidden) {
 			response.Error(c, http.StatusForbidden, "FORBIDDEN", "Tidak punya akses mengupdate film")
-			return
-		}
-		if errors.Is(err, service.ErrInvalidGoogleDriveURL) {
-			response.Error(c, http.StatusBadRequest, "INVALID_GDRIVE_URL", "Link Google Drive tidak valid")
 			return
 		}
 		response.Error(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Gagal mengupdate movie")
@@ -170,4 +168,13 @@ func (h *MovieHandler) TranscodeStatus(c *gin.Context) {
 	}
 
 	response.OK(c, status, "OK")
+}
+
+func (h *MovieHandler) ListExtractors(c *gin.Context) {
+	result, err := h.movies.ListExtractors()
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "EXTRACTORS_ERROR", "Gagal mengambil daftar extractor: "+err.Error())
+		return
+	}
+	response.OK(c, result, "OK")
 }

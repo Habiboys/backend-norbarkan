@@ -16,6 +16,7 @@ type Config struct {
 	Storage StorageConfig
 	Upload  UploadConfig
 	WebRTC  WebRTCConfig
+	Sidecar SidecarConfig
 }
 
 type AppConfig struct {
@@ -62,6 +63,10 @@ type WebRTCConfig struct {
 	TURNUsername        string
 	TURNCredential      string
 	MaxCallParticipants int
+}
+
+type SidecarConfig struct {
+	URL string
 }
 
 func Load() (*Config, error) {
@@ -130,6 +135,9 @@ func Load() (*Config, error) {
 			TURNCredential:      v.GetString("WEBRTC_TURN_CREDENTIAL"),
 			MaxCallParticipants: v.GetInt("MAX_CALL_PARTICIPANTS"),
 		},
+		Sidecar: SidecarConfig{
+			URL: v.GetString("SIDECAR_URL"),
+		},
 	}, nil
 }
 
@@ -159,6 +167,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("WEBRTC_TURN_USERNAME", "")
 	v.SetDefault("WEBRTC_TURN_CREDENTIAL", "")
 	v.SetDefault("MAX_CALL_PARTICIPANTS", 8)
+	v.SetDefault("SIDECAR_URL", "http://localhost:5000")
 }
 
 func splitCSV(value string) []string {

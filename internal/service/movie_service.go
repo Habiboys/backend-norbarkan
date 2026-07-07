@@ -3,8 +3,8 @@ package service
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"backend-nobarkan/internal/config"
@@ -14,15 +14,23 @@ import (
 )
 
 var (
-	ErrMovieNotFound         = errors.New("movie not found")
-	ErrMovieForbidden        = errors.New("movie forbidden")
-	ErrInvalidGoogleDriveURL = errors.New("invalid google drive url")
+	ErrMovieNotFound        = errors.New("movie not found")
+	ErrMovieForbidden       = errors.New("movie forbidden")
+	ErrInvalidExternalURL   = errors.New("invalid external url")
+	ErrSidecarUnavailable   = errors.New("sidecar service unavailable")
 )
 
 type MovieService struct {
-	movies  *repository.MovieRepository
-	storage config.StorageConfig
+	movies       *repository.MovieRepository
+	storage      config.StorageConfig
+	sidecar      *SidecarClient
+
+	extractorsCache     *ExtractorsResult
+	extractorsCacheTime time.Time
+	extractorsMu        sync.Mutex
 }
+
+const extractorsCacheTTL = 1 * time.Hour
 
 type MovieResponse struct {
 	ID              string                 `json:"id"`
@@ -31,10 +39,6 @@ type MovieResponse struct {
 	SourceType      domain.MovieSourceType `json:"source_type"`
 	ProviderName    *string                `json:"provider_name,omitempty"`
 	ExternalURL     *string                `json:"external_url,omitempty"`
-	DriveFileID     *string                `json:"drive_file_id,omitempty"`
-	DriveURL        *string                `json:"drive_url,omitempty"`
-	DrivePreviewURL *string                `json:"drive_preview_url,omitempty"`
-	DriveDirectURL  *string                `json:"drive_direct_url,omitempty"`
 	ThumbnailURL    *string                `json:"thumbnail_url,omitempty"`
 	Duration        *uint                  `json:"duration,omitempty"`
 	FileSize        *uint64                `json:"file_size,omitempty"`
@@ -50,23 +54,22 @@ type MovieListResult struct {
 	Total   int64           `json:"total"`
 }
 
-type CreateGDriveMovieInput struct {
-	Title        string
+type CreateExternalMovieInput struct {
+	URL          string
+	Title        *string // optional, auto-filled from sidecar if empty
 	Description  *string
-	DriveURL     string
-	ThumbnailURL *string
+	ThumbnailURL *string // optional, auto-filled from sidecar if empty
 	UploadedBy   string
 }
 
 type UpdateMovieInput struct {
 	Title        *string
 	Description  *string
-	DriveURL     *string
 	ThumbnailURL *string
 }
 
-func NewMovieService(movies *repository.MovieRepository, storage config.StorageConfig) *MovieService {
-	return &MovieService{movies: movies, storage: storage}
+func NewMovieService(movies *repository.MovieRepository, storage config.StorageConfig, sidecar *SidecarClient) *MovieService {
+	return &MovieService{movies: movies, storage: storage, sidecar: sidecar}
 }
 
 func (s *MovieService) List(filter repository.MovieListFilter) (*MovieListResult, error) {
@@ -87,35 +90,68 @@ func (s *MovieService) List(filter repository.MovieListFilter) (*MovieListResult
 	return &MovieListResult{Data: items, Page: filter.Page, PerPage: filter.PerPage, Total: total}, nil
 }
 
-func (s *MovieService) CreateGDrive(input CreateGDriveMovieInput) (*MovieResponse, error) {
-	title := strings.TrimSpace(input.Title)
-	driveURL := strings.TrimSpace(input.DriveURL)
-	if title == "" || driveURL == "" {
-		return nil, fmt.Errorf("invalid google drive movie payload")
+func (s *MovieService) CreateExternal(input CreateExternalMovieInput) (*MovieResponse, error) {
+	url := strings.TrimSpace(input.URL)
+	if url == "" {
+		return nil, fmt.Errorf("invalid external movie payload: url required")
 	}
 
-	fileID, err := extractGoogleDriveFileID(driveURL)
+	// Extract metadata from sidecar
+	meta, err := s.sidecar.Extract(url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sidecar extract: %w", err)
 	}
 
-	providerName := "Google Drive"
+	title := meta.Title
+	if input.Title != nil && strings.TrimSpace(*input.Title) != "" {
+		title = strings.TrimSpace(*input.Title)
+	}
+
+	thumbnail := normalizeStringPtr(input.ThumbnailURL)
+	if thumbnail == nil && meta.Thumbnail != "" {
+		t := meta.Thumbnail
+		thumbnail = &t
+	}
+
+	providerName := meta.Extractor
+	if providerName == "" {
+		providerName = "external"
+	}
+
+	var duration *uint
+	if meta.Duration > 0 {
+		d := uint(meta.Duration)
+		duration = &d
+	}
+
+	externalURL := url
+	if meta.WebpageURL != "" {
+		externalURL = meta.WebpageURL
+	}
+
 	movie := &domain.Movie{
 		ID:              uuid.NewString(),
 		Title:           title,
 		Description:     normalizeStringPtr(input.Description),
-		SourceType:      domain.MovieSourceGDrive,
+		SourceType:      domain.MovieSourceExternal,
 		ProviderName:    &providerName,
-		ExternalURL:     &driveURL,
-		DriveFileID:     &fileID,
-		DriveURL:        &driveURL,
-		ThumbnailURL:    normalizeStringPtr(input.ThumbnailURL),
+		ExternalURL:     &externalURL,
+		ThumbnailURL:    thumbnail,
+		Duration:        duration,
 		TranscodeStatus: domain.TranscodeDone,
 		UploadedBy:      input.UploadedBy,
 	}
+
+	// Get direct stream URL via sidecar
+	streamInfo, err := s.sidecar.StreamURL(url)
+	if err == nil {
+		movie.OriginalPath = &streamInfo.URL
+	}
+
 	if err := s.movies.Create(movie); err != nil {
 		return nil, err
 	}
+
 	response := s.toResponse(movie)
 	return &response, nil
 }
@@ -164,19 +200,6 @@ func (s *MovieService) Update(id string, userID string, input UpdateMovieInput) 
 	movie.Description = updateStringPtr(movie.Description, input.Description)
 	movie.ThumbnailURL = updateStringPtr(movie.ThumbnailURL, input.ThumbnailURL)
 
-	if input.DriveURL != nil {
-		driveURL := strings.TrimSpace(*input.DriveURL)
-		if driveURL != "" {
-			fileID, err := extractGoogleDriveFileID(driveURL)
-			if err != nil {
-				return nil, ErrInvalidGoogleDriveURL
-			}
-			movie.DriveURL = &driveURL
-			movie.DriveFileID = &fileID
-			movie.ExternalURL = &driveURL
-		}
-	}
-
 	if err := s.movies.Update(movie); err != nil {
 		return nil, err
 	}
@@ -192,7 +215,25 @@ func (s *MovieService) TranscodeStatus(id string) (map[string]interface{}, error
 	if movie == nil {
 		return nil, ErrMovieNotFound
 	}
-	return map[string]interface{}{"id": movie.ID, "transcode_status": "not_applicable", "progress": 100}, nil
+	return map[string]interface{}{"id": movie.ID, "transcode_status": string(movie.TranscodeStatus), "progress": 100}, nil
+}
+
+func (s *MovieService) ListExtractors() (*ExtractorsResult, error) {
+	s.extractorsMu.Lock()
+	defer s.extractorsMu.Unlock()
+
+	if s.extractorsCache != nil && time.Since(s.extractorsCacheTime) < extractorsCacheTTL {
+		return s.extractorsCache, nil
+	}
+
+	result, err := s.sidecar.ListExtractors()
+	if err != nil {
+		return nil, err
+	}
+
+	s.extractorsCache = result
+	s.extractorsCacheTime = time.Now()
+	return result, nil
 }
 
 func (s *MovieService) toResponse(movie *domain.Movie) MovieResponse {
@@ -202,23 +243,6 @@ func (s *MovieService) toResponse(movie *domain.Movie) MovieResponse {
 		uploader = &value
 	}
 
-	var drivePreviewURL *string
-	if movie.DriveFileID != nil && *movie.DriveFileID != "" {
-		value := "https://drive.google.com/file/d/" + *movie.DriveFileID + "/preview"
-		drivePreviewURL = &value
-	}
-
-	driveURL := movie.DriveURL
-	if driveURL == nil {
-		driveURL = movie.ExternalURL
-	}
-
-	var driveDirectURL *string
-	if movie.DriveFileID != nil && *movie.DriveFileID != "" {
-		value := resolveDriveDirectURL(*movie.DriveFileID)
-		driveDirectURL = &value
-	}
-
 	return MovieResponse{
 		ID:              movie.ID,
 		Title:           movie.Title,
@@ -226,10 +250,6 @@ func (s *MovieService) toResponse(movie *domain.Movie) MovieResponse {
 		SourceType:      movie.SourceType,
 		ProviderName:    movie.ProviderName,
 		ExternalURL:     movie.ExternalURL,
-		DriveFileID:     movie.DriveFileID,
-		DriveURL:        driveURL,
-		DrivePreviewURL: drivePreviewURL,
-		DriveDirectURL:  driveDirectURL,
 		ThumbnailURL:    movie.ThumbnailURL,
 		Duration:        movie.Duration,
 		FileSize:        movie.FileSize,
@@ -237,40 +257,6 @@ func (s *MovieService) toResponse(movie *domain.Movie) MovieResponse {
 		UploadedBy:      uploader,
 		CreatedAt:       movie.CreatedAt,
 	}
-}
-
-func resolveDriveDirectURL(fileID string) string {
-	return "/proxy/drive/" + fileID
-}
-
-func extractGoogleDriveFileID(rawURL string) (string, error) {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || parsed.Host == "" {
-		return "", ErrInvalidGoogleDriveURL
-	}
-
-	host := strings.ToLower(parsed.Host)
-	allowedHosts := map[string]bool{
-		"drive.google.com":             true,
-		"www.drive.google.com":         true,
-		"drive.usercontent.google.com": true,
-	}
-	if !allowedHosts[host] {
-		return "", ErrInvalidGoogleDriveURL
-	}
-
-	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	for i, part := range parts {
-		if part == "d" && i+1 < len(parts) && strings.TrimSpace(parts[i+1]) != "" {
-			return strings.TrimSpace(parts[i+1]), nil
-		}
-	}
-
-	if id := strings.TrimSpace(parsed.Query().Get("id")); id != "" {
-		return id, nil
-	}
-
-	return "", ErrInvalidGoogleDriveURL
 }
 
 func normalizeStringPtr(value *string) *string {

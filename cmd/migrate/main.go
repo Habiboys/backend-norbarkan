@@ -135,10 +135,26 @@ func ensureMigrationTable(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version VARCHAR(255) PRIMARY KEY,
-			checksum CHAR(64) NOT NULL,
+			checksum CHAR(64) NOT NULL DEFAULT '',
 			applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 	`)
+	if err != nil {
+		return err
+	}
+	// Add checksum column if missing (upgrade from old schema without checksum)
+	var colCount int
+	_ = db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = 'schema_migrations' AND column_name = 'checksum'
+	`).Scan(&colCount)
+	if colCount == 0 {
+		_, err = db.ExecContext(ctx, `
+			ALTER TABLE schema_migrations
+			ADD COLUMN checksum CHAR(64) NOT NULL DEFAULT ''
+		`)
+	}
 	return err
 }
 
