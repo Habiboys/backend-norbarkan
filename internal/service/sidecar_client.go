@@ -141,7 +141,14 @@ type StreamURLResult struct {
 }
 
 func (s *SidecarClient) StreamURL(videoURL string) (*StreamURLResult, error) {
-	body := map[string]string{"url": videoURL}
+	return s.StreamURLWithFormat(videoURL, "")
+}
+
+func (s *SidecarClient) StreamURLWithFormat(videoURL, formatID string) (*StreamURLResult, error) {
+	body := map[string]interface{}{"url": videoURL}
+	if formatID != "" {
+		body["format_id"] = formatID
+	}
 	payload, _ := json.Marshal(body)
 
 	resp, err := s.client.Post(s.baseURL+"/stream", "application/json", bytes.NewReader(payload))
@@ -158,6 +165,46 @@ func (s *SidecarClient) StreamURL(videoURL string) (*StreamURLResult, error) {
 	var result StreamURLResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("sidecar stream decode failed: %w", err)
+	}
+	return &result, nil
+}
+
+type FormatInfo struct {
+	FormatID string   `json:"format_id"`
+	Ext      *string  `json:"ext,omitempty"`
+	Height   *int     `json:"height,omitempty"`
+	Width    *int     `json:"width,omitempty"`
+	Filesize *int     `json:"filesize,omitempty"`
+	TBR      *float64 `json:"tbr,omitempty"`
+	ACodec   *string  `json:"acodec,omitempty"`
+	VCodec   *string  `json:"vcodec,omitempty"`
+	FPS      *float64 `json:"fps,omitempty"`
+	Note     *string  `json:"note,omitempty"`
+}
+
+type FormatsResult struct {
+	Formats []FormatInfo `json:"formats"`
+	Title   string       `json:"title"`
+}
+
+func (s *SidecarClient) ListFormats(videoURL string) (*FormatsResult, error) {
+	body := map[string]string{"url": videoURL}
+	payload, _ := json.Marshal(body)
+
+	resp, err := s.client.Post(s.baseURL+"/formats", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("sidecar formats request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sidecar formats returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result FormatsResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("sidecar formats decode failed: %w", err)
 	}
 	return &result, nil
 }

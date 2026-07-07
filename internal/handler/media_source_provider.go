@@ -17,7 +17,7 @@ func NewMovieSourceProvider(repo *repository.MovieRepository, sidecar *service.S
 	return &MovieSourceProvider{repo: repo, sidecar: sidecar}
 }
 
-func (p *MovieSourceProvider) GetOriginalPath(movieID string) (string, error) {
+func (p *MovieSourceProvider) GetOriginalPath(movieID string, formatID string) (string, error) {
 	movie, err := p.repo.FindByID(movieID)
 	if err != nil {
 		return "", err
@@ -35,7 +35,7 @@ func (p *MovieSourceProvider) GetOriginalPath(movieID string) (string, error) {
 		return "", nil
 	}
 
-	streamInfo, err := p.sidecar.StreamURL(*movie.ExternalURL)
+	streamInfo, err := p.sidecar.StreamURLWithFormat(*movie.ExternalURL, formatID)
 	if err != nil {
 		log.Printf("[source] sidecar stream url failed for %s: %v", movieID, err)
 		// Fallback to cached URL

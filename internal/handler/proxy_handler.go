@@ -67,7 +67,7 @@ func updateExternalCacheProgress(movieID string, downloaded, total int64) {
 // ---------------------------------------------------------------------------
 
 type MediaSourceProvider interface {
-	GetOriginalPath(movieID string) (string, error)
+	GetOriginalPath(movieID string, formatID string) (string, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +121,8 @@ func (h *ProxyHandler) serveFromStream(c *gin.Context, movieID string) {
 	}
 
 	msProvider := provider.(MediaSourceProvider)
-	streamURL, err := msProvider.GetOriginalPath(movieID)
+	formatID := c.DefaultQuery("format", "")
+	streamURL, err := msProvider.GetOriginalPath(movieID, formatID)
 	if err != nil || streamURL == "" {
 		c.JSON(http.StatusAccepted, gin.H{
 			"error": gin.H{
@@ -235,7 +236,8 @@ func (h *ProxyHandler) ExternalCacheStatus(c *gin.Context) {
 	provider, ok := c.Get("mediaSourceProvider")
 	if ok {
 		msProvider := provider.(MediaSourceProvider)
-		streamURL, err := msProvider.GetOriginalPath(movieID)
+		formatID := c.DefaultQuery("format", "")
+		streamURL, err := msProvider.GetOriginalPath(movieID, formatID)
 		if err == nil && streamURL != "" {
 			c.JSON(http.StatusOK, gin.H{"status": "ready", "cached": false, "stream_url": streamURL})
 			return

@@ -236,6 +236,10 @@ func (s *MovieService) ListExtractors() (*ExtractorsResult, error) {
 	return result, nil
 }
 
+func (s *MovieService) ListFormats(videoURL string) (*FormatsResult, error) {
+	return s.sidecar.ListFormats(videoURL)
+}
+
 func (s *MovieService) toResponse(movie *domain.Movie) MovieResponse {
 	var uploader *UserResponse
 	if movie.Uploader != nil {

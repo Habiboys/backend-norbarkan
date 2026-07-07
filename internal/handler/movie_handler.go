@@ -178,3 +178,37 @@ func (h *MovieHandler) ListExtractors(c *gin.Context) {
 	}
 	response.OK(c, result, "OK")
 }
+
+func (h *MovieHandler) ListFormats(c *gin.Context) {
+	movieID := c.Param("id")
+	if movieID == "" {
+		response.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "ID movie diperlukan")
+		return
+	}
+
+	movie, err := h.movies.Get(movieID)
+	if err != nil {
+		if errors.Is(err, service.ErrMovieNotFound) {
+			response.Error(c, http.StatusNotFound, "MOVIE_NOT_FOUND", "Film tidak ditemukan")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Gagal mengambil data movie: "+err.Error())
+		return
+	}
+
+	// Use external URL as the source URL to query formats
+	var videoURL string
+	if movie.ExternalURL != nil && *movie.ExternalURL != "" {
+		videoURL = *movie.ExternalURL
+	} else {
+		response.Error(c, http.StatusBadRequest, "NO_EXTERNAL_URL", "Film tidak memiliki URL eksternal")
+		return
+	}
+
+	result, err := h.movies.ListFormats(videoURL)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "FORMATS_ERROR", "Gagal mengambil daftar format: "+err.Error())
+		return
+	}
+	response.OK(c, result, "OK")
+}

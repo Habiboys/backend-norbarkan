@@ -138,6 +138,7 @@ func New(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *gin.Engine
 				movies.PUT("/:id", movieHandler.Update)
 				movies.DELETE("/:id", movieHandler.Delete)
 				movies.GET("/:id/transcode-status", movieHandler.TranscodeStatus)
+				movies.GET("/:id/formats", movieHandler.ListFormats)
 			}
 
 			protected.GET("/extractors", movieHandler.ListExtractors)

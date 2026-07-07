@@ -74,6 +74,11 @@ class StatusResponse(BaseModel):
     error: str = ""
 
 
+class StreamURLRequest(BaseModel):
+    url: str
+    format_id: str | None = None
+
+
 class StreamURLResponse(BaseModel):
     url: str
     title: str
@@ -82,14 +87,33 @@ class StreamURLResponse(BaseModel):
     extractor: str | None = None
 
 
+class FormatInfo(BaseModel):
+    format_id: str
+    ext: str | None = None
+    height: int | None = None
+    width: int | None = None
+    filesize: int | None = None
+    tbr: float | None = None
+    acodec: str | None = None
+    vcodec: str | None = None
+    fps: float | None = None
+    note: str | None = None
+
+
+class FormatsResponse(BaseModel):
+    formats: list[FormatInfo]
+    title: str
+
+
 # ---------------------------------------------------------------------------
 # yt-dlp helpers
 # ---------------------------------------------------------------------------
 
 def run_ytdlp_json(args: list[str]) -> dict:
     """Run yt-dlp with --dump-json and return parsed dict."""
-    # Try without format selection first — if fails due to format issues, retry with ignore
+    # Try without format selection first
     cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings",
+           "--extractor-retries", "3",
            "--extractor-args", "youtube:player_client=web"]
     if COOKIES_FILE:
         cmd += ["--cookies", COOKIES_FILE]
@@ -104,9 +128,11 @@ def run_ytdlp_json(args: list[str]) -> dict:
         lines = result.stdout.strip().splitlines()
         return json.loads(lines[-1])
 
-    # Retry with flat info (no format extraction) for videos with restricted formats
+    # Retry with flat info
     cmd2 = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings",
-            "--ignore-no-formats-error", "--flat", "--extractor-args", "youtube:player_client=web"]
+            "--ignore-no-formats-error", "--flat",
+            "--extractor-retries", "3",
+            "--extractor-args", "youtube:player_client=web"]
     if COOKIES_FILE:
         cmd2 += ["--cookies", COOKIES_FILE]
     cmd2 += args
@@ -119,13 +145,13 @@ def run_ytdlp_json(args: list[str]) -> dict:
     if result2.returncode == 0 and result2.stdout.strip():
         lines2 = result2.stdout.strip().splitlines()
         info = json.loads(lines2[-1])
-        # Flat mode may miss some fields — fill defaults
         if "title" not in info or not info.get("title"):
             info["title"] = info.get("id", "Unknown")
         return info
 
-    # Last resort: try --print title (just gets title from webpage, no format extraction)
+    # Last resort: try --print
     cmd3 = [sys.executable, "-m", "yt_dlp", "--print", "title", "--print", "duration", "--print", "thumbnail",
+            "--extractor-retries", "3",
             "--extractor-args", "youtube:player_client=web"]
     if COOKIES_FILE:
         cmd3 += ["--cookies", COOKIES_FILE]
@@ -185,16 +211,17 @@ def extract_metadata(req: ExtractRequest):
 
 
 @app.post("/stream", response_model=StreamURLResponse)
-def stream_url(req: ExtractRequest):
-    """Get direct video URL for streaming. No download."""
+def stream_url(req: StreamURLRequest):
+    """Get direct video URL for streaming. Optional format_id for quality selection."""
     try:
-        # yt-dlp -g gives direct media URL
-        # Try with format selector first, then fall back
+        format_spec = req.format_id or "best/bestvideo+bestaudio/best"
         direct_url = None
+        last_stderr = ""
 
-        # Attempt 1: with format
-        cmd1 = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
-                "--no-warnings", "--extractor-args", "youtube:player_client=web"]
+        # Attempt 1: requested format with web client
+        cmd1 = [sys.executable, "-m", "yt_dlp", "-g", "-f", format_spec,
+                "--no-warnings", "--extractor-retries", "3",
+                "--extractor-args", "youtube:player_client=web"]
         if COOKIES_FILE:
             cmd1 += ["--cookies", COOKIES_FILE]
         cmd1 += [req.url]
@@ -203,10 +230,13 @@ def stream_url(req: ExtractRequest):
             urls = result1.stdout.strip().splitlines()
             if urls:
                 direct_url = urls[-1]
+        else:
+            last_stderr = result1.stderr.strip()
 
-        # Attempt 2: no format restriction (yt-dlp picks best)
+        # Attempt 2: no format restriction
         if not direct_url:
             cmd2 = [sys.executable, "-m", "yt_dlp", "-g", "--no-warnings",
+                    "--extractor-retries", "3",
                     "--extractor-args", "youtube:player_client=web"]
             if COOKIES_FILE:
                 cmd2 += ["--cookies", COOKIES_FILE]
@@ -216,11 +246,14 @@ def stream_url(req: ExtractRequest):
                 urls = result2.stdout.strip().splitlines()
                 if urls:
                     direct_url = urls[-1]
+            else:
+                last_stderr = result2.stderr.strip()
 
-        # Attempt 3: --ignore-no-formats-error
+        # Attempt 3: android client (less bot detection)
         if not direct_url:
-            cmd3 = [sys.executable, "-m", "yt_dlp", "-g", "--ignore-no-formats-error", "--no-warnings",
-                    "--extractor-args", "youtube:player_client=web"]
+            cmd3 = [sys.executable, "-m", "yt_dlp", "-g", "--no-warnings",
+                    "--extractor-retries", "3",
+                    "--extractor-args", "youtube:player_client=android"]
             if COOKIES_FILE:
                 cmd3 += ["--cookies", COOKIES_FILE]
             cmd3 += [req.url]
@@ -229,11 +262,45 @@ def stream_url(req: ExtractRequest):
                 urls = result3.stdout.strip().splitlines()
                 if urls:
                     direct_url = urls[-1]
+            else:
+                last_stderr = result3.stderr.strip()
+
+        # Attempt 4: --ignore-no-formats-error with web
+        if not direct_url:
+            cmd4 = [sys.executable, "-m", "yt_dlp", "-g", "--ignore-no-formats-error",
+                    "--no-warnings", "--extractor-retries", "3",
+                    "--extractor-args", "youtube:player_client=web"]
+            if COOKIES_FILE:
+                cmd4 += ["--cookies", COOKIES_FILE]
+            cmd4 += [req.url]
+            result4 = subprocess.run(cmd4, capture_output=True, text=True, timeout=30)
+            if result4.returncode == 0:
+                urls = result4.stdout.strip().splitlines()
+                if urls:
+                    direct_url = urls[-1]
+            else:
+                last_stderr = result4.stderr.strip()
+
+        # Attempt 5: flat --print url (last resort)
+        if not direct_url:
+            cmd5 = [sys.executable, "-m", "yt_dlp", "--print", "url",
+                    "--ignore-no-formats-error", "--no-warnings",
+                    "--extractor-retries", "3",
+                    "--extractor-args", "youtube:player_client=web"]
+            if COOKIES_FILE:
+                cmd5 += ["--cookies", COOKIES_FILE]
+            cmd5 += [req.url]
+            result5 = subprocess.run(cmd5, capture_output=True, text=True, timeout=30)
+            if result5.returncode == 0:
+                urls = result5.stdout.strip().splitlines()
+                if urls:
+                    direct_url = urls[-1]
+            else:
+                last_stderr = result5.stderr.strip()
 
         if not direct_url:
-            # Best effort: return last error
-            err = result3.stderr.strip() if 'result3' in dir() else (result2.stderr.strip() if 'result2' in dir() else result1.stderr.strip())
-            raise RuntimeError(f"yt-dlp stream failed: {err}")
+            err_msg = last_stderr if last_stderr else "yt-dlp could not extract any stream URL. Video may be geo-restricted or require authentication."
+            raise RuntimeError(f"yt-dlp stream failed: {err_msg}")
 
         # Get metadata for response
         try:
@@ -254,6 +321,112 @@ def stream_url(req: ExtractRequest):
         raise HTTPException(status_code=504, detail="yt-dlp timed out getting stream URL")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stream URL failed: {str(e)}")
+
+
+@app.post("/formats", response_model=FormatsResponse)
+def list_formats(req: ExtractRequest):
+    """List available video/audio formats for a URL."""
+    try:
+        cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings",
+               "--extractor-args", "youtube:player_client=web"]
+        if COOKIES_FILE:
+            cmd += ["--cookies", COOKIES_FILE]
+        cmd += [req.url]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            # Retry with --ignore-no-formats-error
+            cmd2 = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings",
+                    "--ignore-no-formats-error", "--flat",
+                    "--extractor-args", "youtube:player_client=web"]
+            if COOKIES_FILE:
+                cmd2 += ["--cookies", COOKIES_FILE]
+            cmd2 += [req.url]
+            result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=30)
+            if result2.returncode != 0 or not result2.stdout.strip():
+                raise RuntimeError(result2.stderr.strip() or result.stderr.strip())
+            lines = result2.stdout.strip().splitlines()
+            info = json.loads(lines[-1])
+        else:
+            lines = result.stdout.strip().splitlines()
+            info = json.loads(lines[-1])
+
+        title = info.get("title", "Unknown")
+        raw_formats = info.get("formats", [])
+        if not raw_formats:
+            fmt = {
+                "format_id": info.get("format_id", "best"),
+                "ext": info.get("ext"),
+                "height": info.get("height"),
+                "width": info.get("width"),
+                "filesize": info.get("filesize"),
+                "tbr": info.get("tbr"),
+                "acodec": info.get("acodec"),
+                "vcodec": info.get("vcodec"),
+                "fps": info.get("fps"),
+            }
+            raw_formats = [fmt] if fmt.get("format_id") else []
+
+        formats = []
+        seen = set()
+        for f in raw_formats:
+            fid = f.get("format_id", "")
+            if not fid or fid in seen:
+                continue
+            seen.add(fid)
+            height = f.get("height")
+            ext = f.get("ext", "")
+            tbr = f.get("tbr")
+            acodec = f.get("acodec", "")
+            vcodec = f.get("vcodec", "")
+
+            parts = []
+            if height:
+                suffix = "p" if not str(height).endswith("p") else ""
+                parts.append(f"{height}{suffix}")
+            if ext:
+                parts.append(ext.upper())
+            if tbr:
+                parts.append(f"~{int(tbr)}kbps")
+            if vcodec and vcodec != "none":
+                parts.append(vcodec.split(".")[0])
+            if acodec and acodec != "none":
+                parts.append("audio")
+            note = " ".join(parts) if parts else None
+
+            formats.append(FormatInfo(
+                format_id=fid,
+                ext=ext or None,
+                height=height,
+                width=f.get("width"),
+                filesize=f.get("filesize"),
+                tbr=tbr,
+                acodec=acodec,
+                vcodec=vcodec,
+                fps=f.get("fps"),
+                note=note,
+            ))
+
+        def sort_key(f):
+            has_v = f.vcodec and f.vcodec != "none"
+            has_a = f.acodec and f.acodec != "none"
+            if has_v and has_a:
+                cat = 0
+            elif has_v:
+                cat = 1
+            else:
+                cat = 2
+            h = f.height or 0
+            return (cat, -h)
+
+        formats.sort(key=sort_key)
+
+        return FormatsResponse(formats=formats, title=title)
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="yt-dlp timed out listing formats")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"List formats failed: {str(e)}")
 
 
 @app.post("/download", response_model=DownloadResponse)
@@ -294,12 +467,11 @@ def _do_download(task: TaskInfo, task_id: str):
     update(status="downloading", started_at=datetime.utcnow().isoformat())
 
     try:
-        # Use output template to write to the target path
         ydl_opts = [
             "-f", "bestvideo+bestaudio/best",
             "--merge-output-format", "mp4",
             "-o", task.cache_path,
-            "--no-part",        # don't use .part files
+            "--no-part",
             "--no-mtime",
             task.url,
         ]
@@ -311,7 +483,6 @@ def _do_download(task: TaskInfo, task_id: str):
         )
         task._process = proc
 
-        # Read output line by line to extract progress
         progress_re = __import__("re").compile(r"\[download\]\s+([\d.]+)%")
         for line in proc.stdout or []:
             m = progress_re.search(line)
@@ -324,7 +495,6 @@ def _do_download(task: TaskInfo, task_id: str):
         if proc.returncode != 0:
             raise RuntimeError(f"yt-dlp exited with code {proc.returncode}")
 
-        # Verify file exists and has size
         if not os.path.isfile(task.cache_path) or os.path.getsize(task.cache_path) == 0:
             raise RuntimeError("Download produced empty or missing file")
 
@@ -332,7 +502,6 @@ def _do_download(task: TaskInfo, task_id: str):
 
     except Exception as e:
         update(status="failed", error=str(e))
-        # Clean up partial download
         if os.path.isfile(task.cache_path):
             try:
                 os.remove(task.cache_path)
