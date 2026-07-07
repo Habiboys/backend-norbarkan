@@ -17,6 +17,7 @@ app = FastAPI(title="Nobarkan yt-dlp Sidecar")
 SIDECAR_PORT = int(os.environ.get("SIDECAR_PORT", "5000"))
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "./storage/cache/external")
 DOWNLOAD_TIMEOUT = int(os.environ.get("DOWNLOAD_TIMEOUT", "600"))  # 10 min default
+COOKIES_FILE = os.environ.get("COOKIES_FILE", "")
 
 os.makedirs(STORAGE_PATH, exist_ok=True)
 
@@ -87,7 +88,10 @@ class StreamURLResponse(BaseModel):
 
 def run_ytdlp_json(args: list[str]) -> dict:
     """Run yt-dlp with --dump-json and return parsed dict."""
-    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings"] + args
+    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings"]
+    if COOKIES_FILE:
+        cmd += ["--cookies", COOKIES_FILE]
+    cmd += args
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -104,7 +108,10 @@ def run_ytdlp_json(args: list[str]) -> dict:
 
 def run_ytdlp_download(args: list[str]) -> subprocess.CompletedProcess:
     """Run yt-dlp download, return CompletedProcess."""
-    cmd = [sys.executable, "-m", "yt_dlp", "--no-warnings"] + args
+    cmd = [sys.executable, "-m", "yt_dlp", "--no-warnings"]
+    if COOKIES_FILE:
+        cmd += ["--cookies", COOKIES_FILE]
+    cmd += args
     return subprocess.run(cmd, capture_output=True, text=True, timeout=DOWNLOAD_TIMEOUT)
 
 
@@ -138,7 +145,10 @@ def stream_url(req: ExtractRequest):
     """Get direct video URL for streaming. No download."""
     try:
         # yt-dlp -g gives direct media URL
-        cmd = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best", "--no-warnings", req.url]
+        cmd = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best", "--no-warnings"]
+        if COOKIES_FILE:
+            cmd += ["--cookies", COOKIES_FILE]
+        cmd += [req.url]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
             raise RuntimeError(f"yt-dlp stream failed: {result.stderr.strip()}")

@@ -9,6 +9,10 @@ services:
       SIDECAR_PORT: 5000
       STORAGE_PATH: /app/storage/cache/external
       DOWNLOAD_TIMEOUT: 600
+      COOKIES_FILE: /app/cookies.txt
+    volumes:
+      - ./storage:/app/storage
+      - ./cookies.txt:/app/cookies.txt
     restart: unless-stopped
 
   backend:
