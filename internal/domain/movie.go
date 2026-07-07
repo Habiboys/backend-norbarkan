@@ -22,7 +22,7 @@ type Movie struct {
 	SourceType      MovieSourceType `json:"source_type" gorm:"type:enum('external');not null;default:'external';index"`
 	ProviderName    *string         `json:"provider_name" gorm:"type:varchar(100)"`
 	ExternalURL     *string         `json:"external_url" gorm:"type:varchar(1000)"`
-	OriginalPath    *string         `json:"original_path" gorm:"type:varchar(500)"`
+	OriginalPath    *string         `json:"original_path" gorm:"type:text"`
 	HLSPath         *string         `json:"hls_path" gorm:"type:varchar(500)"`
 	ThumbnailURL    *string         `json:"thumbnail_url" gorm:"type:varchar(500)"`
 	Duration        *uint           `json:"duration"`

@@ -89,7 +89,8 @@ class StreamURLResponse(BaseModel):
 def run_ytdlp_json(args: list[str]) -> dict:
     """Run yt-dlp with --dump-json and return parsed dict."""
     # Try without format selection first — if fails due to format issues, retry with ignore
-    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings"]
+    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings",
+           "--extractor-args", "youtube:player_client=web"]
     if COOKIES_FILE:
         cmd += ["--cookies", COOKIES_FILE]
     cmd += args
@@ -105,7 +106,7 @@ def run_ytdlp_json(args: list[str]) -> dict:
 
     # Retry with flat info (no format extraction) for videos with restricted formats
     cmd2 = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings",
-            "--ignore-no-formats-error", "--flat"]
+            "--ignore-no-formats-error", "--flat", "--extractor-args", "youtube:player_client=web"]
     if COOKIES_FILE:
         cmd2 += ["--cookies", COOKIES_FILE]
     cmd2 += args
@@ -124,7 +125,8 @@ def run_ytdlp_json(args: list[str]) -> dict:
         return info
 
     # Last resort: try --print title (just gets title from webpage, no format extraction)
-    cmd3 = [sys.executable, "-m", "yt_dlp", "--print", "title", "--print", "duration", "--print", "thumbnail"]
+    cmd3 = [sys.executable, "-m", "yt_dlp", "--print", "title", "--print", "duration", "--print", "thumbnail",
+            "--extractor-args", "youtube:player_client=web"]
     if COOKIES_FILE:
         cmd3 += ["--cookies", COOKIES_FILE]
     cmd3 += args
@@ -191,7 +193,8 @@ def stream_url(req: ExtractRequest):
         direct_url = None
 
         # Attempt 1: with format
-        cmd1 = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best", "--no-warnings"]
+        cmd1 = [sys.executable, "-m", "yt_dlp", "-g", "-f", "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
+                "--no-warnings", "--extractor-args", "youtube:player_client=web"]
         if COOKIES_FILE:
             cmd1 += ["--cookies", COOKIES_FILE]
         cmd1 += [req.url]
@@ -203,7 +206,8 @@ def stream_url(req: ExtractRequest):
 
         # Attempt 2: no format restriction (yt-dlp picks best)
         if not direct_url:
-            cmd2 = [sys.executable, "-m", "yt_dlp", "-g", "--no-warnings"]
+            cmd2 = [sys.executable, "-m", "yt_dlp", "-g", "--no-warnings",
+                    "--extractor-args", "youtube:player_client=web"]
             if COOKIES_FILE:
                 cmd2 += ["--cookies", COOKIES_FILE]
             cmd2 += [req.url]
@@ -215,7 +219,8 @@ def stream_url(req: ExtractRequest):
 
         # Attempt 3: --ignore-no-formats-error
         if not direct_url:
-            cmd3 = [sys.executable, "-m", "yt_dlp", "-g", "--ignore-no-formats-error", "--no-warnings"]
+            cmd3 = [sys.executable, "-m", "yt_dlp", "-g", "--ignore-no-formats-error", "--no-warnings",
+                    "--extractor-args", "youtube:player_client=web"]
             if COOKIES_FILE:
                 cmd3 += ["--cookies", COOKIES_FILE]
             cmd3 += [req.url]
